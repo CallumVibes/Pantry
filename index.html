@@ -151,7 +151,8 @@
   .suggests { display:flex; gap:.45rem; overflow-x:auto; padding:0 1.1rem .7rem; scrollbar-width:none; }
   .suggests::-webkit-scrollbar { display:none; }
   .chip { flex-shrink:0; white-space:nowrap; font-size:.92rem; color:var(--pen-ink);
-    background:var(--pen-wash); border:1px solid transparent; padding:.5rem .9rem; border-radius:999px; }
+    background:var(--pen-wash); border:1px solid transparent; padding:.5rem .9rem; border-radius:999px;
+    user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:pan-x; }
   .chip:hover { border-color:var(--pen); }
   .chip .plus { color:var(--pen); font-weight:700; margin-right:.28rem; }
 </style>
@@ -270,7 +271,13 @@ function pruneTombstones(s, ttl = TOMBSTONE_TTL_MS) { const cutoff = Date.now() 
   const hist = Object.fromEntries(Object.entries(s.history || {}).sort((a, b) => b[1].t - a[1].t).slice(0, HISTORY_CAP));
   return { v: 1, items, history: hist }; }
 function recentNames(s, cap = 40) {
-  return Object.values(s.history || {}).sort((a, b) => b.t - a.t).slice(0, cap).map((e) => e.name); }
+  return Object.values(s.history || {}).filter((e) => !e.hidden).sort((a, b) => b.t - a.t).slice(0, cap).map((e) => e.name); }
+// Forgetting a suggestion is a hidden-tombstone (LWW by t), so the "forget"
+// wins over other devices' copies instead of being resurrected on merge.
+function forgetName(s, name) { const key = name.toLowerCase(); const cur = (s.history || {})[key];
+  return { v: 1, items: s.items, history: { ...(s.history || {}), [key]: { name: cur ? cur.name : name, t: now(), hidden: true } } }; }
+function rememberName(s, name) { const key = name.toLowerCase();
+  return { v: 1, items: s.items, history: { ...(s.history || {}), [key]: { name, t: now() } } }; }
 function canonical(x) { if (x === null || typeof x !== 'object') return JSON.stringify(x);
   if (Array.isArray(x)) return `[${x.map(canonical).join(',')}]`;
   return `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${canonical(x[k])}`).join(',')}}`; }
@@ -503,6 +510,11 @@ const actions = {
     showToast(`Cleared ${ids.length} item${ids.length > 1 ? 's' : ''}`,
       () => sync.mutate((s, c) => ids.reduce((acc, id) => restoreItem(acc, c, id), s)));
   },
+  forgetSuggestion: (name) => {
+    if (!sync) return;
+    sync.mutate((st) => forgetName(st, name));
+    showToast(`Removed "${name}" from suggestions`, () => sync.mutate((st) => rememberName(st, name)));
+  },
 };
 
 // --- toast + undo + flash -------------------------------------------------
@@ -549,6 +561,31 @@ function ShareButton({ className, label, onDone }) {
     onDone?.();
   };
   return html`<button class=${className} onClick=${go}>${label}</button>`;
+}
+
+function Chip({ name, onAdd }) {
+  const timer = useRef(null);
+  const longFired = useRef(false);
+  const startXY = useRef(null);
+  const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const start = (e) => {
+    longFired.current = false;
+    startXY.current = { x: e.clientX, y: e.clientY };
+    timer.current = setTimeout(() => {
+      longFired.current = true; timer.current = null;
+      if (navigator.vibrate) navigator.vibrate(15);
+      actions.forgetSuggestion(name);
+    }, 500);
+  };
+  const move = (e) => {
+    if (!startXY.current) return;
+    if (Math.abs(e.clientX - startXY.current.x) > 10 || Math.abs(e.clientY - startXY.current.y) > 10) clear();
+  };
+  const click = (e) => { if (longFired.current) { e.preventDefault(); longFired.current = false; return; } onAdd(); };
+  return html`<button class="chip" title=${'Add ' + name + ' — hold to remove'}
+    onPointerDown=${start} onPointerMove=${move} onPointerUp=${clear} onPointerLeave=${clear} onPointerCancel=${clear}
+    onContextMenu=${(e) => { e.preventDefault(); clear(); if (!longFired.current) { longFired.current = true; actions.forgetSuggestion(name); } }}
+    onClick=${click}><span class="plus">+</span>${name}</button>`;
 }
 
 function ItemRow({ item, flash }) {
@@ -617,8 +654,7 @@ function ListView() {
         .filter((n) => !q || n.toLowerCase().includes(q))
         .slice(0, 12);
       return sugg.length > 0 && html`<div class="suggests">
-        ${sugg.map((n) => html`<button class="chip" key=${n}
-          onClick=${() => { actions.add(n); setDraft(''); }}><span class="plus">+</span>${n}</button>`)}
+        ${sugg.map((n) => html`<${Chip} key=${n} name=${n} onAdd=${() => { actions.add(n); setDraft(''); }} />`)}
       </div>`;
     })()}
     <main>
