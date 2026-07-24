@@ -96,10 +96,12 @@
   .box { width:22px; height:22px; border:2.5px solid var(--pen); border-radius:6px; transition:background .15s; }
   .row.done .box { background:var(--pen); box-shadow:inset 0 0 0 3px var(--card); }
   .rbody { display:flex; align-items:baseline; gap:.6rem; min-width:0; }
-  .name { flex:1; min-width:0; font-size:1.06rem; font-weight:500; letter-spacing:-.01em; color:var(--ink);
-    line-height:1.3; overflow-wrap:anywhere; transition:color .2s ease; }
+  .name { flex:1; min-width:0; text-align:left; padding:0; font-size:1.06rem; font-weight:500; letter-spacing:-.01em;
+    color:var(--ink); line-height:1.3; overflow-wrap:anywhere; transition:color .2s ease; }
   .row.done .name { color:var(--ink-faint); text-decoration:line-through;
     text-decoration-color:var(--pen); text-decoration-thickness:2.5px; }
+  .name-input { flex:1; min-width:0; font-size:1.06rem; font-weight:500; padding:2px 6px;
+    border:1px solid var(--pen); border-radius:var(--r-sm); background:var(--card); }
   .qty, .qty-input { font-family:var(--font-mono); font-size:.8rem; color:var(--ink-soft); flex-shrink:0; }
   .qty { padding:4px 6px; border-radius:var(--r-sm); }
   .qty:hover { background:var(--pen-wash); color:var(--pen-ink); }
@@ -108,9 +110,47 @@
   .del { width:var(--tap); height:var(--tap); font-size:1.5rem; line-height:1; color:var(--ink-faint); border-radius:var(--r-sm); }
   .del:hover { color:var(--alert); }
 
-  .toast { position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%); z-index:20;
+  .toast { position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%); z-index:40;
     background:var(--ink); color:#fff; font-size:.9rem; padding:.7rem 1.1rem; border-radius:999px;
     box-shadow:0 8px 24px -12px rgba(0,0,0,.5); }
+
+  .brand { display:flex; align-items:center; gap:.5rem; padding:.2rem .3rem; border-radius:var(--r-sm); max-width:72%; }
+  .brand:hover { background:var(--card); }
+  .brand h1 { font-size:1.15rem; margin:0; letter-spacing:-.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chev { color:var(--ink-faint); font-size:.7rem; flex-shrink:0; }
+
+  .sheet-overlay { position:fixed; inset:0; background:rgba(35,34,25,.4); z-index:30; display:flex; align-items:flex-end; animation:fade .15s ease; }
+  @keyframes fade { from{opacity:0;} to{opacity:1;} }
+  .sheet { background:var(--paper); width:100%; max-height:82vh; overflow:auto;
+    border-radius:var(--r-lg) var(--r-lg) 0 0; padding:1.1rem 1.1rem 2rem; animation:rise .2s ease; }
+  @keyframes rise { from{transform:translateY(100%);} to{transform:translateY(0);} }
+  .sheet h2 { font-size:1.1rem; font-weight:700; margin:.2rem 0 .8rem; }
+  .hh { display:flex; align-items:center; gap:.6rem; padding:.65rem 0; border-bottom:1px solid var(--line); }
+  .hh .tick2 { width:22px; height:22px; border-radius:50%; border:2px solid var(--card-edge);
+    flex-shrink:0; display:grid; place-items:center; color:#fff; font-size:.72rem; }
+  .hh.active .tick2 { border-color:var(--pen); background:var(--pen); }
+  .hh-name { flex:1; text-align:left; font-size:1.02rem; font-weight:500; padding:.2rem 0; overflow-wrap:anywhere; }
+  .hh.active .hh-name { color:var(--pen-ink); }
+  .hh-input { flex:1; font-size:1rem; padding:.35rem .5rem; border:1px solid var(--pen); border-radius:var(--r-sm); background:var(--card); }
+  .hh-edit, .hh-del { width:34px; height:34px; flex-shrink:0; color:var(--ink-faint); border-radius:var(--r-sm); font-size:1.05rem; }
+  .hh-edit:hover, .hh-del:hover { background:var(--card); color:var(--ink); }
+  .hh-del:hover { color:var(--alert); }
+  .hh-confirm { color:#fff; background:var(--alert); font-size:.8rem; font-weight:600; padding:.4rem .7rem; border-radius:var(--r-sm); }
+  .hh-cancel { color:var(--ink-soft); font-size:.8rem; padding:.4rem .5rem; }
+  .sheet-actions { display:flex; flex-direction:column; gap:.6rem; margin-top:1.1rem; }
+  .sheet-actions .primary, .sheet-actions .ghost { height:48px; }
+  .join-row { display:flex; gap:.5rem; }
+  .join-input { flex:1; min-width:0; height:48px; padding:0 .9rem; border:2px solid var(--card-edge);
+    border-radius:var(--r-md); background:var(--card); font-size:.95rem; font-family:var(--font-mono); }
+  .join-input:focus { border-color:var(--pen); outline:none; }
+  .primary.sm { height:48px; padding:0 1.1rem; }
+
+  .suggests { display:flex; gap:.45rem; overflow-x:auto; padding:0 1.1rem .7rem; scrollbar-width:none; }
+  .suggests::-webkit-scrollbar { display:none; }
+  .chip { flex-shrink:0; white-space:nowrap; font-size:.92rem; color:var(--pen-ink);
+    background:var(--pen-wash); border:1px solid transparent; padding:.5rem .9rem; border-radius:999px; }
+  .chip:hover { border-color:var(--pen); }
+  .chip .plus { color:var(--pen); font-weight:700; margin-right:.28rem; }
 </style>
 </head>
 <body>
@@ -174,6 +214,7 @@ async function idb(store, mode, fn) {
 }
 const getMeta = (k) => idb('meta', 'readonly', (s) => s.get(k));
 const setMeta = (k, v) => idb('meta', 'readwrite', (s) => s.put(v, k));
+const delMeta = (k) => idb('meta', 'readwrite', (s) => s.delete(k));
 const loadSnap = (id) => idb('lists', 'readonly', (s) => s.get(id));
 const saveSnap = (id, snap) => idb('lists', 'readwrite', (s) => s.put(snap, id));
 async function requestPersistence() {
@@ -181,7 +222,8 @@ async function requestPersistence() {
 }
 
 /* --- CRDT (validated: commutative / idempotent / associative merge) -------- */
-const EMPTY_STATE = { v: 1, items: {} };
+const EMPTY_STATE = { v: 1, items: {}, history: {} };
+const HISTORY_CAP = 60; // keep the payload bounded — plenty for a household
 function randomHex(n) { const b = new Uint8Array(n); crypto.getRandomValues(b);
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''); }
 const newClientId = () => randomHex(4);
@@ -195,18 +237,24 @@ function mergeItem(a, b) { return { id: a.id, born: Math.min(a.born, b.born),
   name: mergeReg(a.name, b.name), qty: mergeReg(a.qty, b.qty), note: mergeReg(a.note, b.note),
   cat: mergeReg(a.cat, b.cat), checked: mergeReg(a.checked, b.checked), deleted: mergeReg(a.deleted, b.deleted) }; }
 function observeItem(i) { for (const k of ['name','qty','note','cat','checked','deleted']) observe(i[k].t); }
+function mergeHistory(a = {}, b = {}) { const out = { ...a };
+  for (const [k, v] of Object.entries(b)) { observe(v.t); if (!out[k] || v.t > out[k].t) out[k] = v; }
+  return out; }
 function mergeList(a, b) { const items = { ...a.items };
   for (const [id, bi] of Object.entries(b.items)) { observeItem(bi); items[id] = items[id] ? mergeItem(items[id], bi) : bi; }
-  return { v: 1, items }; }
-function addItem(s, c, f) { const id = newItemId();
-  const item = { id, born: now(), name: reg((f.name || '').trim(), c), qty: reg(f.qty || '', c),
+  return { v: 1, items, history: mergeHistory(a.history, b.history) }; }
+function addItem(s, c, f) { const id = newItemId(); const name = (f.name || '').trim();
+  const item = { id, born: now(), name: reg(name, c), qty: reg(f.qty || '', c),
     note: reg(f.note || '', c), cat: reg(f.cat || '', c), checked: reg(false, c), deleted: reg(false, c) };
-  return { v: 1, items: { ...s.items, [id]: item } }; }
+  const history = { ...(s.history || {}) };
+  if (name) history[name.toLowerCase()] = { name, t: now() }; // remember for quick re-add
+  return { v: 1, items: { ...s.items, [id]: item }, history }; }
 function setFields(s, c, id, patch) { const cur = s.items[id]; if (!cur) return s;
   const next = { ...cur }; for (const [k, v] of Object.entries(patch)) next[k] = reg(v, c);
-  return { v: 1, items: { ...s.items, [id]: next } }; }
+  return { v: 1, items: { ...s.items, [id]: next }, history: s.history || {} }; }
 const setChecked = (s, c, id, v) => setFields(s, c, id, { checked: v });
 const setQty = (s, c, id, v) => setFields(s, c, id, { qty: v });
+const setName = (s, c, id, v) => setFields(s, c, id, { name: v.trim() });
 const removeItem = (s, c, id) => setFields(s, c, id, { deleted: true });
 function clearChecked(s, c) { let out = s;
   for (const i of Object.values(s.items)) if (i.checked.v && !i.deleted.v) out = removeItem(out, c, i.id); return out; }
@@ -215,7 +263,10 @@ function visibleItems(s) { return Object.values(s.items).filter((i) => !i.delete
   const cat = a.cat.v.localeCompare(b.cat.v); if (cat) return cat; return a.born - b.born; }); }
 function pruneTombstones(s, ttl = TOMBSTONE_TTL_MS) { const cutoff = Date.now() - ttl; const items = {};
   for (const [id, i] of Object.entries(s.items)) { if (i.deleted.v && i.deleted.t < cutoff) continue; items[id] = i; }
-  return { v: 1, items }; }
+  const hist = Object.fromEntries(Object.entries(s.history || {}).sort((a, b) => b[1].t - a[1].t).slice(0, HISTORY_CAP));
+  return { v: 1, items, history: hist }; }
+function recentNames(s, cap = 40) {
+  return Object.values(s.history || {}).sort((a, b) => b.t - a.t).slice(0, cap).map((e) => e.name); }
 function canonical(x) { if (x === null || typeof x !== 'object') return JSON.stringify(x);
   if (Array.isArray(x)) return `[${x.map(canonical).join(',')}]`;
   return `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${canonical(x[k])}`).join(',')}}`; }
@@ -293,21 +344,63 @@ class ListSync {
 }
 
 /* --- controller ----------------------------------------------------------- */
-const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false }, showSave: false };
+const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
+    showSave: false, households: [], activeId: null, activeName: 'Shopping List', sheetOpen: false, suggestions: [] };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
 
 let sync = null; let identity = null;
+let households = [];   // [{ id: npub, name, sk: hex }]
+let activeId = null;
 
-async function adopt(sk) {
-  await setMeta('sk', bytesToHex(sk));
-  identity = identityFrom(sk);
+function pushHouseholds() {
+  const active = households.find((h) => h.id === activeId);
+  store.set({ households: households.map((h) => ({ id: h.id, name: h.name })), activeId,
+    activeName: active ? active.name : 'Shopping List' });
+}
+const persist = () => Promise.all([setMeta('households', households), setMeta('activeId', activeId)]);
+function nextName(base) {
+  const names = new Set(households.map((h) => h.name));
+  if (!names.has(base)) return base;
+  let i = 2; while (names.has(`${base} ${i}`)) i++; return `${base} ${i}`;
+}
+
+// Start syncing the active household's list. Each household has its own key,
+// so its own listId and its own cached snapshot — switching is just this.
+async function adopt(skHex) {
+  identity = identityFrom(hexToBytes(skHex));
   await requestPersistence();
   sync?.stop();
-  sync = new ListSync({ secretKey: sk, relays: DEFAULT_RELAYS, listName: LIST_NAME,
-    onState: (st) => store.set({ items: visibleItems(st) }),
+  sync = new ListSync({ secretKey: identity.sk, relays: DEFAULT_RELAYS, listName: LIST_NAME,
+    onState: (st) => store.set({ items: visibleItems(st), suggestions: recentNames(st) }),
     onStatus: (patch) => store.set({ status: { ...store.get().status, ...patch } }) });
   await sync.start();
+}
+
+async function switchTo(id) {
+  const h = households.find((x) => x.id === id); if (!h) return;
+  activeId = id; await persist(); pushHouseholds();
+  store.set({ screen: 'list', items: [], sheetOpen: false, showSave: false });
+  await adopt(h.sk);
+}
+
+// A key (nsec) becomes a household. Adds if new, just switches if we already
+// have it — so opening a link never overwrites an existing list.
+function keyFromText(text) {
+  const t = (text || '').trim();
+  const m = t.match(/[#&?]k=([a-z0-9]+)/i);
+  if (m) return m[1];
+  if (t.toLowerCase().startsWith('nsec1')) return t;
+  return null;
+}
+async function joinKey(nsecOrKey, defaultName) {
+  const id = parseNsec(nsecOrKey);            // throws if invalid
+  const existing = households.find((h) => h.id === id.npub);
+  if (existing) { await switchTo(existing.id); return 'switched'; }
+  households.push({ id: id.npub, name: nextName(defaultName || 'Shared list'), sk: bytesToHex(id.sk) });
+  await persist();
+  await switchTo(id.npub);
+  return 'joined';
 }
 
 async function boot() {
@@ -316,29 +409,68 @@ async function boot() {
   const shared = p.get('share_title') || p.get('share_text'); // Web Share Target
   if (shared) { store.set({ pendingAdd: shared.trim() }); history.replaceState(null, '', location.pathname); }
 
+  households = (await getMeta('households')) || [];
+  activeId = await getMeta('activeId');
+
+  // Migrate the old single-key format into a household.
+  const legacy = await getMeta('sk');
+  if (legacy && households.length === 0) {
+    const id = identityFrom(hexToBytes(legacy));
+    households = [{ id: id.npub, name: 'My list', sk: legacy }];
+    activeId = id.npub; await persist(); await delMeta('sk');
+  }
+
   const linkKey = new URLSearchParams(location.hash.slice(1)).get('k');
   if (linkKey) {
     try {
-      await adopt(parseNsec(linkKey).sk);
-      history.replaceState(null, '', location.pathname + location.search); // strip the key from the address bar
-      store.set({ screen: 'list' });
+      await joinKey(linkKey, 'Shared list');
+      history.replaceState(null, '', location.pathname + location.search); // strip key from the address bar
       return;
-    } catch { /* not a valid key — fall through */ }
+    } catch { /* invalid key — fall through */ }
   }
 
-  const skHex = await getMeta('sk');
-  if (skHex) { await adopt(hexToBytes(skHex)); store.set({ screen: 'list' }); }
-  else { store.set({ screen: 'welcome' }); }
+  if (households.length) {
+    if (!households.find((h) => h.id === activeId)) activeId = households[0].id;
+    await switchTo(activeId);
+  } else {
+    store.set({ screen: 'welcome' });
+  }
 }
 
 const actions = {
-  createList: async () => { await adopt(createIdentity().sk); store.set({ screen: 'list', showSave: true }); },
+  openSheet: () => store.set({ sheetOpen: true }),
+  closeSheet: () => store.set({ sheetOpen: false }),
+  switchTo,
+  createList: async () => {
+    const id = createIdentity();
+    households.push({ id: id.npub, name: nextName('New list'), sk: bytesToHex(id.sk) });
+    await persist();
+    await switchTo(id.npub);
+    store.set({ showSave: true });
+  },
+  joinFromText: async (text) => {
+    const key = keyFromText(text);
+    if (!key) return 'bad';
+    try { await joinKey(key, 'Shared list'); return 'ok'; } catch { return 'bad'; }
+  },
+  rename: async (id, name) => {
+    const h = households.find((x) => x.id === id); if (!h) return;
+    h.name = name.trim() || h.name; await persist(); pushHouseholds();
+  },
+  removeHousehold: async (id) => {
+    households = households.filter((h) => h.id !== id); await persist();
+    if (activeId === id) {
+      if (households.length) { await switchTo(households[0].id); }
+      else { sync?.stop(); sync = null; identity = null; activeId = null; await setMeta('activeId', null);
+        pushHouseholds(); store.set({ screen: 'welcome', sheetOpen: false, items: [] }); }
+    } else { pushHouseholds(); }
+  },
   shareLink: async () => {
     const url = location.origin + location.pathname + '#k=' + identity.nsec;
     try {
       if (navigator.share) { await navigator.share({ title: 'Our shopping list', text: 'Open our shared shopping list', url }); return 'shared'; }
       await navigator.clipboard.writeText(url); return 'copied';
-    } catch (e) { if (String(e).includes('Abort')) return 'shared'; // user cancelled the sheet
+    } catch (e) { if (String(e).includes('Abort')) return 'shared';
       try { await navigator.clipboard.writeText(url); return 'copied'; } catch { return 'fail'; } }
   },
   dismissSave: () => store.set({ showSave: false }),
@@ -346,6 +478,7 @@ const actions = {
   toggle: (it) => sync?.mutate((s, c) => setChecked(s, c, it.id, !it.checked.v)),
   remove: (it) => sync?.mutate((s, c) => removeItem(s, c, it.id)),
   setQty: (it, q) => sync?.mutate((s, c) => setQty(s, c, it.id, q)),
+  renameItem: (it, name) => { const n = name.trim(); if (n) sync?.mutate((s, c) => setName(s, c, it.id, n)); },
   clearChecked: () => sync?.mutate((s, c) => clearChecked(s, c)),
 };
 
@@ -370,15 +503,24 @@ function ShareButton({ className, label, onDone }) {
 
 function ItemRow({ item }) {
   const done = item.checked.v;
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(false);   // quantity
   const [draft, setDraft] = useState('');
   const commit = () => { setEditing(false); if (draft.trim() !== item.qty.v) actions.setQty(item, draft.trim()); };
+
+  const [editName, setEditName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const commitName = () => { setEditName(false); if (nameDraft.trim() && nameDraft.trim() !== item.name.v) actions.renameItem(item, nameDraft); };
+
   return html`<li class=${'row' + (done ? ' done' : '')}>
     <button class="tick" role="checkbox" aria-checked=${done}
       aria-label=${done ? 'Uncheck ' + item.name.v : 'Check off ' + item.name.v}
       onClick=${() => actions.toggle(item)}><span class="box"></span></button>
     <div class="rbody">
-      <span class="name">${item.name.v}</span>
+      ${editName
+        ? html`<input class="name-input" autofocus value=${nameDraft} aria-label="Item name"
+            onInput=${(e) => setNameDraft(e.target.value)} onBlur=${commitName}
+            onKeyDown=${(e) => e.key === 'Enter' && commitName()} />`
+        : html`<button class="name" onClick=${() => { setNameDraft(item.name.v); setEditName(true); }}>${item.name.v}</button>`}
       ${editing
         ? html`<input class="qty-input" autofocus value=${draft} placeholder="qty" aria-label="Quantity"
             onInput=${(e) => setDraft(e.target.value)} onBlur=${commit} onKeyDown=${(e) => e.key === 'Enter' && commit()} />`
@@ -400,7 +542,8 @@ function ListView() {
   const submit = (e) => { e.preventDefault(); actions.add(draft); setDraft(''); };
   return html`<div>
     <header class="bar">
-      <div class="brand"><span class="mark">✓</span><h1>Shopping List</h1></div>
+      <button class="brand" onClick=${actions.openSheet} aria-label="Switch list">
+        <span class="mark">✓</span><h1>${s.activeName}</h1><span class="chev">▼</span></button>
       <${ShareButton} className="share" label=${html`<span>Share</span>`} onDone=${showToast} />
     </header>
     <div class=${'status' + (s.status.error ? ' err' : s.status.online && !s.status.pending ? ' live' : '')}>
@@ -417,6 +560,18 @@ function ListView() {
         enterkeyhint="done" onInput=${(e) => setDraft(e.target.value)} />
       <button class="add-btn" type="submit" disabled=${!draft.trim()} aria-label="Add">Add</button>
     </form>
+    ${(() => {
+      const onList = new Set(s.items.map((i) => i.name.v.toLowerCase()));
+      const q = draft.trim().toLowerCase();
+      const sugg = (s.suggestions || [])
+        .filter((n) => !onList.has(n.toLowerCase()))
+        .filter((n) => !q || n.toLowerCase().includes(q))
+        .slice(0, 12);
+      return sugg.length > 0 && html`<div class="suggests">
+        ${sugg.map((n) => html`<button class="chip" key=${n}
+          onClick=${() => { actions.add(n); setDraft(''); }}><span class="plus">+</span>${n}</button>`)}
+      </div>`;
+    })()}
     <main>
       ${s.items.length === 0
         ? html`<div class="empty"><p class="empty-head">Nothing on the list yet.</p>
@@ -440,11 +595,60 @@ function Welcome() {
   </div>`;
 }
 
+function ListsSheet() {
+  const s = useStore();
+  const [editId, setEditId] = useState(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinText, setJoinText] = useState('');
+  const [toast, showToast] = useToast();
+
+  const startEdit = (h) => { setEditId(h.id); setNameDraft(h.name); };
+  const commitEdit = () => { if (nameDraft.trim()) actions.rename(editId, nameDraft.trim()); setEditId(null); };
+  const doJoin = async () => {
+    const r = await actions.joinFromText(joinText);
+    if (r === 'bad') showToast("That link didn't work");
+    else { setJoinOpen(false); setJoinText(''); }
+  };
+
+  return html`<div class="sheet-overlay"
+      onClick=${(e) => { if (e.target.classList.contains('sheet-overlay')) actions.closeSheet(); }}>
+    <div class="sheet">
+      <h2>Your lists</h2>
+      ${s.households.map((h) => html`<div class=${'hh' + (h.id === s.activeId ? ' active' : '')} key=${h.id}>
+        <span class="tick2">${h.id === s.activeId ? '✓' : ''}</span>
+        ${editId === h.id
+          ? html`<input class="hh-input" autofocus value=${nameDraft} aria-label="List name"
+              onInput=${(e) => setNameDraft(e.target.value)} onBlur=${commitEdit}
+              onKeyDown=${(e) => e.key === 'Enter' && commitEdit()} />`
+          : html`<button class="hh-name" onClick=${() => actions.switchTo(h.id)}>${h.name}</button>`}
+        ${confirmId === h.id
+          ? html`<button class="hh-confirm" onClick=${() => actions.removeHousehold(h.id)}>Remove</button>
+                 <button class="hh-cancel" onClick=${() => setConfirmId(null)}>Cancel</button>`
+          : html`<button class="hh-edit" aria-label="Rename list" onClick=${() => startEdit(h)}>✎</button>
+                 <button class="hh-del" aria-label="Remove list" onClick=${() => setConfirmId(h.id)}>×</button>`}
+      </div>`)}
+
+      <div class="sheet-actions">
+        ${joinOpen
+          ? html`<div class="join-row">
+              <input class="join-input" autofocus placeholder="Paste a shared link" value=${joinText}
+                onInput=${(e) => setJoinText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && doJoin()} />
+              <button class="primary sm" onClick=${doJoin}>Join</button></div>`
+          : html`<button class="ghost" onClick=${() => setJoinOpen(true)}>Join with a link</button>`}
+        <button class="primary" onClick=${actions.createList}>Start a new list</button>
+      </div>
+      ${toast}
+    </div>
+  </div>`;
+}
+
 function App() {
   const s = useStore();
   if (s.screen === 'loading') return html`<div class="boot"><span class="mark">✓</span></div>`;
   if (s.screen === 'welcome') return html`<${Welcome} />`;
-  return html`<${ListView} />`;
+  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}</div>`;
 }
 
 try { render(html`<${App} />`, document.getElementById('app')); boot(); }
