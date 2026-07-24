@@ -19,6 +19,7 @@
     --paper:#eef0ea; --card:#fbfbf8; --card-edge:#e4e6de;
     --ink:#232219; --ink-soft:#6d6b5f; --ink-faint:#a6a498; --line:#e0e2d9;
     --pen:#2a27c4; --pen-ink:#211fa0; --pen-wash:#ecebfb;
+    --prio-red:#d64545; --prio-amber:#e0932e; --prio-green:#3c8a57;
     --fresh:#3c8a57; --alert:#c23d2b;
     --r-sm:6px; --r-md:12px; --r-lg:20px;
     --font-display:'Bricolage Grotesque', system-ui, sans-serif;
@@ -90,8 +91,20 @@
     font-family:var(--font-mono); font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); }
   .clear { color:var(--pen-ink); } .clear:hover { text-decoration:underline; }
 
-  .row { display:grid; grid-template-columns:var(--tap) 1fr auto; align-items:center;
-    min-height:56px; padding:.35rem .25rem .35rem 0; border-bottom:1px solid var(--line); }
+  .row { display:grid; grid-template-columns:30px var(--tap) 1fr auto; align-items:center;
+    min-height:56px; padding:.35rem .25rem .35rem 0; border-bottom:1px solid var(--line);
+    border-left:3px solid transparent; }
+  /* left stripe for at-a-glance scanning in the shop */
+  .row.pr-red { border-left-color:var(--prio-red); }
+  .row.pr-yellow { border-left-color:var(--prio-amber); }
+  .row.pr-green { border-left-color:var(--prio-green); }
+  /* tappable priority dot — colour AND shape encode level (colourblind-safe) */
+  .prio { height:var(--tap); width:30px; display:grid; place-items:center; }
+  .pdot { width:14px; height:14px; border-radius:50%; box-sizing:border-box; }
+  .pd-none .pdot { width:10px; height:10px; border:1.5px solid var(--ink-faint); opacity:.5; }
+  .pd-red .pdot { background:var(--prio-red); }                                   /* solid */
+  .pd-yellow .pdot { background:var(--prio-amber); box-shadow:inset 0 0 0 3px var(--card); } /* ring-in-solid */
+  .pd-green .pdot { border:3px solid var(--prio-green); }                          /* hollow ring */
   .tick { height:var(--tap); display:grid; place-items:center; }
   .box { width:22px; height:22px; border:2.5px solid var(--pen); border-radius:6px; transition:background .15s; }
   .row.done .box { background:var(--pen); box-shadow:inset 0 0 0 3px var(--card); }
@@ -228,6 +241,7 @@ async function requestPersistence() {
 /* --- CRDT (validated: commutative / idempotent / associative merge) -------- */
 const EMPTY_STATE = { v: 1, items: {}, history: {} };
 const HISTORY_CAP = 60; // keep the payload bounded — plenty for a household
+const NOPRIO = { v: '', t: 0 }; // default for items from before priorities existed
 function randomHex(n) { const b = new Uint8Array(n); crypto.getRandomValues(b);
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''); }
 const newClientId = () => randomHex(4);
@@ -239,8 +253,9 @@ const reg = (v, c) => ({ v, t: now(), c });
 function mergeReg(a, b) { if (a.t !== b.t) return a.t > b.t ? a : b; if (a.c !== b.c) return a.c > b.c ? a : b; return a; }
 function mergeItem(a, b) { return { id: a.id, born: Math.min(a.born, b.born),
   name: mergeReg(a.name, b.name), qty: mergeReg(a.qty, b.qty), note: mergeReg(a.note, b.note),
-  cat: mergeReg(a.cat, b.cat), checked: mergeReg(a.checked, b.checked), deleted: mergeReg(a.deleted, b.deleted) }; }
-function observeItem(i) { for (const k of ['name','qty','note','cat','checked','deleted']) observe(i[k].t); }
+  cat: mergeReg(a.cat, b.cat), checked: mergeReg(a.checked, b.checked), deleted: mergeReg(a.deleted, b.deleted),
+  prio: mergeReg(a.prio || NOPRIO, b.prio || NOPRIO) }; }
+function observeItem(i) { for (const k of ['name','qty','note','cat','checked','deleted','prio']) { const r = i[k]; if (r) observe(r.t); } }
 function mergeHistory(a = {}, b = {}) { const out = { ...a };
   for (const [k, v] of Object.entries(b)) { observe(v.t); if (!out[k] || v.t > out[k].t) out[k] = v; }
   return out; }
@@ -249,7 +264,7 @@ function mergeList(a, b) { const items = { ...a.items };
   return { v: 1, items, history: mergeHistory(a.history, b.history) }; }
 function addItem(s, c, f) { const id = newItemId(); const name = (f.name || '').trim();
   const item = { id, born: now(), name: reg(name, c), qty: reg(f.qty || '', c),
-    note: reg(f.note || '', c), cat: reg(f.cat || '', c), checked: reg(false, c), deleted: reg(false, c) };
+    note: reg(f.note || '', c), cat: reg(f.cat || '', c), checked: reg(false, c), deleted: reg(false, c), prio: reg('', c) };
   const history = { ...(s.history || {}) };
   if (name) history[name.toLowerCase()] = { name, t: now() }; // remember for quick re-add
   return { v: 1, items: { ...s.items, [id]: item }, history }; }
@@ -259,12 +274,18 @@ function setFields(s, c, id, patch) { const cur = s.items[id]; if (!cur) return 
 const setChecked = (s, c, id, v) => setFields(s, c, id, { checked: v });
 const setQty = (s, c, id, v) => setFields(s, c, id, { qty: v });
 const setName = (s, c, id, v) => setFields(s, c, id, { name: v.trim() });
+const setPrio = (s, c, id, v) => setFields(s, c, id, { prio: v });
 const removeItem = (s, c, id) => setFields(s, c, id, { deleted: true });
 const restoreItem = (s, c, id) => setFields(s, c, id, { deleted: false });
 function clearChecked(s, c) { let out = s;
   for (const i of Object.values(s.items)) if (i.checked.v && !i.deleted.v) out = removeItem(out, c, i.id); return out; }
+// Urgency order for unchecked items: red, yellow, then normal (unmarked), then
+// green ("whenever") at the bottom. Checked items always sink below all of them.
+const PRIO_RANK = { red: 0, yellow: 1, '': 2, green: 3 };
+const prioOf = (i) => (i.prio && i.prio.v) || '';
 function visibleItems(s) { return Object.values(s.items).filter((i) => !i.deleted.v).sort((a, b) => {
   if (a.checked.v !== b.checked.v) return a.checked.v ? 1 : -1;
+  const pr = (PRIO_RANK[prioOf(a)] ?? 2) - (PRIO_RANK[prioOf(b)] ?? 2); if (pr) return pr;
   const cat = a.cat.v.localeCompare(b.cat.v); if (cat) return cat; return a.born - b.born; }); }
 function pruneTombstones(s, ttl = TOMBSTONE_TTL_MS) { const cutoff = Date.now() - ttl; const items = {};
   for (const [id, i] of Object.entries(s.items)) { if (i.deleted.v && i.deleted.t < cutoff) continue; items[id] = i; }
@@ -522,6 +543,12 @@ const actions = {
   },
   setQty: (it, q) => sync?.mutate((s, c) => setQty(s, c, it.id, q)),
   renameItem: (it, name) => { const n = name.trim(); if (n) sync?.mutate((s, c) => setName(s, c, it.id, n)); },
+  cyclePrio: (it) => {
+    const order = ['', 'red', 'yellow', 'green']; // tap: none → urgent → soon → whenever → none
+    const cur = (it.prio && it.prio.v) || '';
+    const nextP = order[(order.indexOf(cur) + 1) % order.length];
+    sync?.mutate((s, c) => setPrio(s, c, it.id, nextP));
+  },
   clearChecked: () => {
     const ids = store.get().items.filter((i) => i.checked.v).map((i) => i.id);
     if (!ids.length || !sync) return;
@@ -617,7 +644,13 @@ function ItemRow({ item, flash }) {
   const [nameDraft, setNameDraft] = useState('');
   const commitName = () => { setEditName(false); if (nameDraft.trim() && nameDraft.trim() !== item.name.v) actions.renameItem(item, nameDraft); };
 
-  return html`<li class=${'row' + (done ? ' done' : '') + (flash ? ' flash' : '')}>
+  const prio = (item.prio && item.prio.v) || '';
+  const PRIO_LABEL = { '': 'No priority', red: 'Urgent', yellow: 'Soon', green: 'Whenever' };
+
+  return html`<li class=${'row' + (done ? ' done' : '') + (flash ? ' flash' : '') + (prio ? ' pr-' + prio : '')}>
+    <button class=${'prio pd-' + (prio || 'none')} onClick=${() => actions.cyclePrio(item)}
+      aria-label=${'Priority: ' + PRIO_LABEL[prio] + ' (tap to change)'} title=${PRIO_LABEL[prio] + ' — tap to change'}>
+      <span class="pdot"></span></button>
     <button class="tick" role="checkbox" aria-checked=${done}
       aria-label=${done ? 'Uncheck ' + item.name.v : 'Check off ' + item.name.v}
       onClick=${() => actions.toggle(item)}><span class="box"></span></button>
