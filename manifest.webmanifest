@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Shopping List",
-  "short_name": "List",
+  "name": "Pantry",
+  "short_name": "Pantry",
   "description": "A shared family shopping list.",
   "start_url": "./",
   "scope": "./",

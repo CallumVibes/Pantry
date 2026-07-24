@@ -7,10 +7,10 @@
 <meta name="description" content="A shared family shopping list." />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="apple-mobile-web-app-title" content="Shopping List" />
+<meta name="apple-mobile-web-app-title" content="Pantry" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-<title>Shopping List</title>
+<title>Pantry</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -314,12 +314,31 @@ class ListSync {
     this.clientId = (await getMeta('clientId')) || (await (async () => { const c = newClientId(); await setMeta('clientId', c); return c; })());
     const snap = (await loadSnap(this.listId)) || { state: EMPTY_STATE, lastCreatedAt: 0, dirty: false };
     this.state = snap.state; this.lastCreatedAt = snap.lastCreatedAt; this.dirty = snap.dirty;
-    this.opts.onState(this.state); this._subscribe();
-    document.addEventListener('visibilitychange', this._wake); addEventListener('online', this._wake);
+    this.opts.onState(this.state); this.refresh();
+    // Cover every way the app can come to the foreground: tab switch, window
+    // focus, reconnect, and — importantly for an installed PWA — bfcache/resume.
+    document.addEventListener('visibilitychange', this._wake);
+    addEventListener('online', this._wake); addEventListener('focus', this._wake); addEventListener('pageshow', this._wake);
     if (this.dirty) this._schedule(0); }
-  stop() { document.removeEventListener('visibilitychange', this._wake); removeEventListener('online', this._wake);
+  stop() { document.removeEventListener('visibilitychange', this._wake);
+    removeEventListener('online', this._wake); removeEventListener('focus', this._wake); removeEventListener('pageshow', this._wake);
     clearTimeout(this.debounce); clearTimeout(this.retry); this.sub?.close(); this.pool.close(this.relays); }
-  _wake = () => { if (document.visibilityState === 'hidden') return; this._subscribe(); if (this.dirty) this._schedule(0); };
+  _wake = () => { if (document.visibilityState === 'hidden') return; this.refresh(); if (this.dirty) this._schedule(0); };
+  // Re-open the live subscription AND actively pull the latest event now, so
+  // opening the app always shows what others added rather than waiting.
+  async refresh() {
+    const t = Date.now();
+    if (t - (this._lastRefresh || 0) < 1500) return; // coalesce focus+visibility+pageshow
+    this._lastRefresh = t;
+    this.opts.onStatus?.({ pending: true });
+    this._subscribe();
+    try {
+      const evs = await this.pool.querySync(this.relays,
+        { kinds: [LIST_KIND], authors: [this.cipher.pubkey], '#d': [this.dTag] });
+      for (const ev of evs) this._onRemote(ev);
+      this.opts.onStatus?.({ online: true, pending: this.dirty });
+    } catch { /* offline — the live subscription will catch up when back */ }
+  }
   _subscribe() { this.sub?.close();
     this.sub = this.pool.subscribeMany(this.relays,
       [{ kinds: [LIST_KIND], authors: [this.cipher.pubkey], '#d': [this.dTag] }],
@@ -356,7 +375,7 @@ class ListSync {
 
 /* --- controller ----------------------------------------------------------- */
 const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
-    showSave: false, households: [], activeId: null, activeName: 'Shopping List', sheetOpen: false,
+    showSave: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
     suggestions: [], toast: null, flashId: null };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
@@ -368,7 +387,7 @@ let activeId = null;
 function pushHouseholds() {
   const active = households.find((h) => h.id === activeId);
   store.set({ households: households.map((h) => ({ id: h.id, name: h.name })), activeId,
-    activeName: active ? active.name : 'Shopping List' });
+    activeName: active ? active.name : 'Pantry' });
 }
 const persist = () => Promise.all([setMeta('households', households), setMeta('activeId', activeId)]);
 function nextName(base) {
@@ -741,7 +760,7 @@ catch (e) { document.getElementById('app').innerHTML =
 </script>
 
 <!--
-  BASIC SHOPPING LIST — how it works
+  PANTRY — how it works
   ==================================
   • First open → "Start the list" generates a key, stored on the device. No
     passphrase, no login. You're straight into the list.

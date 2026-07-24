@@ -1,4 +1,4 @@
-# Shopping List
+# Pantry
 
 A shared shopping list for the people you live with. One family, one list —
 everyone can add to it, tick things off in the shop, and see each other's changes
@@ -79,11 +79,11 @@ _headers              hosting hints (Netlify/Cloudflare; ignored by GitHub Pages
 
 ### GitHub Pages
 
-1. Create a **new public repository** at github.com (e.g. `shopping-list`).
+1. Create a **new public repository** at github.com (e.g. `pantry`).
 2. **Add file -> Upload files**, drag in *all* the files above, **Commit changes**.
 3. **Settings -> Pages** -> Source: **Deploy from a branch**, branch **main**,
    folder **/ (root)** -> **Save**.
-4. Wait ~1 minute for your URL: `https://YOURNAME.github.io/shopping-list/`.
+4. Wait ~1 minute for your URL: `https://YOURNAME.github.io/pantry/`.
 5. Open it -> **Start the list** -> **Share** the link with your family.
 
 To install: open the URL, wait a few seconds, **reload once**, then browser menu ->
