@@ -112,7 +112,10 @@
 
   .toast { position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%); z-index:40;
     background:var(--ink); color:#fff; font-size:.9rem; padding:.7rem 1.1rem; border-radius:999px;
-    box-shadow:0 8px 24px -12px rgba(0,0,0,.5); }
+    box-shadow:0 8px 24px -12px rgba(0,0,0,.5); display:flex; align-items:center; gap:1rem; max-width:90vw; }
+  .toast-undo { color:#fff; font-weight:700; text-decoration:underline; padding:.1rem .3rem; flex-shrink:0; }
+  @keyframes flashbg { 0% { background:var(--pen-wash); } 100% { background:transparent; } }
+  .row.flash { animation:flashbg 1.2s ease; }
 
   .brand { display:flex; align-items:center; gap:.5rem; padding:.2rem .3rem; border-radius:var(--r-sm); max-width:72%; }
   .brand:hover { background:var(--card); }
@@ -256,6 +259,7 @@ const setChecked = (s, c, id, v) => setFields(s, c, id, { checked: v });
 const setQty = (s, c, id, v) => setFields(s, c, id, { qty: v });
 const setName = (s, c, id, v) => setFields(s, c, id, { name: v.trim() });
 const removeItem = (s, c, id) => setFields(s, c, id, { deleted: true });
+const restoreItem = (s, c, id) => setFields(s, c, id, { deleted: false });
 function clearChecked(s, c) { let out = s;
   for (const i of Object.values(s.items)) if (i.checked.v && !i.deleted.v) out = removeItem(out, c, i.id); return out; }
 function visibleItems(s) { return Object.values(s.items).filter((i) => !i.deleted.v).sort((a, b) => {
@@ -345,7 +349,8 @@ class ListSync {
 
 /* --- controller ----------------------------------------------------------- */
 const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
-    showSave: false, households: [], activeId: null, activeName: 'Shopping List', sheetOpen: false, suggestions: [] };
+    showSave: false, households: [], activeId: null, activeName: 'Shopping List', sheetOpen: false,
+    suggestions: [], toast: null, flashId: null };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
 
@@ -474,34 +479,79 @@ const actions = {
       try { await navigator.clipboard.writeText(url); return 'copied'; } catch { return 'fail'; } }
   },
   dismissSave: () => store.set({ showSave: false }),
-  add: (name) => { const n = name.trim(); if (n && sync) sync.mutate((s, c) => addItem(s, c, { name: n })); },
+  showToast,
+  undo: () => { const fn = pendingUndo; pendingUndo = null; store.set({ toast: null }); if (fn) fn(); },
+  // "milk, eggs, bread" → three items. Skips anything already on the list
+  // (flashing the existing row instead of adding a duplicate).
+  add: (raw) => {
+    if (!sync) return;
+    const parts = (raw || '').split(',').map((x) => x.trim()).filter(Boolean);
+    for (const n of parts) addOne(n);
+  },
   toggle: (it) => sync?.mutate((s, c) => setChecked(s, c, it.id, !it.checked.v)),
-  remove: (it) => sync?.mutate((s, c) => removeItem(s, c, it.id)),
+  remove: (it) => {
+    const id = it.id, name = it.name.v;
+    sync?.mutate((s, c) => removeItem(s, c, id));
+    showToast(`Removed "${name}"`, () => sync?.mutate((s, c) => restoreItem(s, c, id)));
+  },
   setQty: (it, q) => sync?.mutate((s, c) => setQty(s, c, it.id, q)),
   renameItem: (it, name) => { const n = name.trim(); if (n) sync?.mutate((s, c) => setName(s, c, it.id, n)); },
-  clearChecked: () => sync?.mutate((s, c) => clearChecked(s, c)),
+  clearChecked: () => {
+    const ids = store.get().items.filter((i) => i.checked.v).map((i) => i.id);
+    if (!ids.length || !sync) return;
+    sync.mutate((s, c) => ids.reduce((acc, id) => removeItem(acc, c, id), s));
+    showToast(`Cleared ${ids.length} item${ids.length > 1 ? 's' : ''}`,
+      () => sync.mutate((s, c) => ids.reduce((acc, id) => restoreItem(acc, c, id), s)));
+  },
 };
+
+// --- toast + undo + flash -------------------------------------------------
+let pendingUndo = null; let toastTimer = null; let flashTimer = null;
+function showToast(msg, undoFn) {
+  pendingUndo = undoFn || null;
+  store.set({ toast: { msg, canUndo: !!undoFn } });
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { pendingUndo = null; store.set({ toast: null }); }, undoFn ? 5000 : 1800);
+}
+function flash(id) {
+  store.set({ flashId: id });
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => store.set({ flashId: null }), 1200);
+}
+function addOne(name) {
+  const existing = store.get().items.find((i) => i.name.v.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    // already here — if it was ticked off, bring it back; either way, flash it.
+    if (existing.checked.v) sync.mutate((s, c) => setChecked(s, c, existing.id, false));
+    flash(existing.id);
+    return;
+  }
+  sync.mutate((s, c) => addItem(s, c, { name }));
+}
 
 /* --- UI ------------------------------------------------------------------- */
 function useStore() { const [s, setS] = useState(store.get()); useEffect(() => store.sub(setS), []); return s; }
 
-function useToast() {
-  const [msg, setMsg] = useState('');
-  const show = (m) => { setMsg(m); setTimeout(() => setMsg(''), 1800); };
-  const node = msg ? html`<div class="toast">${msg}</div>` : null;
-  return [node, show];
+function Toast() {
+  const s = useStore();
+  if (!s.toast) return null;
+  return html`<div class="toast">
+    <span>${s.toast.msg}</span>
+    ${s.toast.canUndo && html`<button class="toast-undo" onClick=${actions.undo}>Undo</button>`}
+  </div>`;
 }
 
 function ShareButton({ className, label, onDone }) {
   const go = async () => {
     const r = await actions.shareLink();
-    if (r === 'copied') onDone?.('Link copied — send it to your family');
-    else if (r === 'fail') onDone?.('Could not share');
+    if (r === 'copied') { actions.showToast('Link copied — send it to your family'); }
+    else if (r === 'fail') { actions.showToast('Could not share'); }
+    onDone?.();
   };
   return html`<button class=${className} onClick=${go}>${label}</button>`;
 }
 
-function ItemRow({ item }) {
+function ItemRow({ item, flash }) {
   const done = item.checked.v;
   const [editing, setEditing] = useState(false);   // quantity
   const [draft, setDraft] = useState('');
@@ -511,7 +561,7 @@ function ItemRow({ item }) {
   const [nameDraft, setNameDraft] = useState('');
   const commitName = () => { setEditName(false); if (nameDraft.trim() && nameDraft.trim() !== item.name.v) actions.renameItem(item, nameDraft); };
 
-  return html`<li class=${'row' + (done ? ' done' : '')}>
+  return html`<li class=${'row' + (done ? ' done' : '') + (flash ? ' flash' : '')}>
     <button class="tick" role="checkbox" aria-checked=${done}
       aria-label=${done ? 'Uncheck ' + item.name.v : 'Check off ' + item.name.v}
       onClick=${() => actions.toggle(item)}><span class="box"></span></button>
@@ -533,7 +583,6 @@ function ItemRow({ item }) {
 function ListView() {
   const s = useStore();
   const [draft, setDraft] = useState(s.pendingAdd || '');
-  const [toast, showToast] = useToast();
   useEffect(() => { if (s.pendingAdd) setDraft(s.pendingAdd); }, [s.pendingAdd]);
   const open = s.items.filter((i) => !i.checked.v);
   const done = s.items.filter((i) => i.checked.v);
@@ -544,14 +593,14 @@ function ListView() {
     <header class="bar">
       <button class="brand" onClick=${actions.openSheet} aria-label="Switch list">
         <span class="mark">✓</span><h1>${s.activeName}</h1><span class="chev">▼</span></button>
-      <${ShareButton} className="share" label=${html`<span>Share</span>`} onDone=${showToast} />
+      <${ShareButton} className="share" label=${html`<span>Share</span>`} />
     </header>
     <div class=${'status' + (s.status.error ? ' err' : s.status.online && !s.status.pending ? ' live' : '')}>
       <span class="dot"></span>${label}</div>
 
     ${s.showSave && html`<div class="banner">
       <p>Share this list with your family so everyone can add to it — and so you don’t lose it.</p>
-      <${ShareButton} className="b-share" label="Share" onDone=${(m) => { showToast(m); actions.dismissSave(); }} />
+      <${ShareButton} className="b-share" label="Share" onDone=${actions.dismissSave} />
       <button class="dismiss" aria-label="Dismiss" onClick=${actions.dismissSave}>×</button>
     </div>`}
 
@@ -576,12 +625,11 @@ function ListView() {
       ${s.items.length === 0
         ? html`<div class="empty"><p class="empty-head">Nothing on the list yet.</p>
             <p class="empty-sub">Add the first thing above. Everyone you share the list with sees it.</p></div>`
-        : html`<ul class="items">${open.map((it) => html`<${ItemRow} key=${it.id} item=${it} />`)}</ul>
+        : html`<ul class="items">${open.map((it) => html`<${ItemRow} key=${it.id} item=${it} flash=${it.id === s.flashId} />`)}</ul>
             ${done.length > 0 && html`<div class="done-head"><span>In the basket · ${done.length}</span>
               <button class="clear" onClick=${actions.clearChecked}>Clear</button></div>
-              <ul class="items">${done.map((it) => html`<${ItemRow} key=${it.id} item=${it} />`)}</ul>`}`}
+              <ul class="items">${done.map((it) => html`<${ItemRow} key=${it.id} item=${it} flash=${it.id === s.flashId} />`)}</ul>`}`}
     </main>
-    ${toast}
   </div>`;
 }
 
@@ -602,13 +650,12 @@ function ListsSheet() {
   const [confirmId, setConfirmId] = useState(null);
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinText, setJoinText] = useState('');
-  const [toast, showToast] = useToast();
 
   const startEdit = (h) => { setEditId(h.id); setNameDraft(h.name); };
   const commitEdit = () => { if (nameDraft.trim()) actions.rename(editId, nameDraft.trim()); setEditId(null); };
   const doJoin = async () => {
     const r = await actions.joinFromText(joinText);
-    if (r === 'bad') showToast("That link didn't work");
+    if (r === 'bad') actions.showToast("That link didn't work");
     else { setJoinOpen(false); setJoinText(''); }
   };
 
@@ -637,9 +684,8 @@ function ListsSheet() {
                 onInput=${(e) => setJoinText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && doJoin()} />
               <button class="primary sm" onClick=${doJoin}>Join</button></div>`
           : html`<button class="ghost" onClick=${() => setJoinOpen(true)}>Join with a link</button>`}
-        <button class="primary" onClick=${actions.createList}>Start a new list</button>
+        <button class="primary" onClick=${actions.createList}>Add a new list</button>
       </div>
-      ${toast}
     </div>
   </div>`;
 }
@@ -647,8 +693,8 @@ function ListsSheet() {
 function App() {
   const s = useStore();
   if (s.screen === 'loading') return html`<div class="boot"><span class="mark">✓</span></div>`;
-  if (s.screen === 'welcome') return html`<${Welcome} />`;
-  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}</div>`;
+  if (s.screen === 'welcome') return html`<div><${Welcome} /><${Toast} /></div>`;
+  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}<${Toast} /></div>`;
 }
 
 try { render(html`<${App} />`, document.getElementById('app')); boot(); }
