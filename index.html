@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Shopping List" />
 <link rel="manifest" href="manifest.webmanifest" />
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <title>Shopping List</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -468,7 +468,8 @@ catch (e) { document.getElementById('app').innerHTML =
   • Still a PWA: installable + works offline (service worker caches the shell
     and the CDN modules; sync resumes when back online).
 
-  Deploy: serve index.html + manifest.webmanifest + sw.js + icons/ together,
+  Deploy: serve index.html, manifest.webmanifest, sw.js and the icon PNGs
+  together, same-origin, over HTTPS. Drag the folder onto Netlify Drop, or push to GitHub
   same-origin, over HTTPS. Drag the folder onto Netlify Drop, or push to GitHub
   Pages / Cloudflare Pages.
 
