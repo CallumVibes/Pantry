@@ -91,24 +91,19 @@
     font-family:var(--font-mono); font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); }
   .clear { color:var(--pen-ink); } .clear:hover { text-decoration:underline; }
 
-  .row { display:grid; grid-template-columns:30px var(--tap) 1fr auto; align-items:center;
-    min-height:56px; padding:.35rem .25rem .35rem 0; border-bottom:1px solid var(--line);
-    border-left:3px solid transparent; }
-  /* left stripe: urgent items only */
-  .row.pr-red { border-left-color:var(--prio-red); }
-  /* tappable urgent dot — solid red when urgent, faint hollow otherwise */
-  .prio { height:var(--tap); width:30px; display:grid; place-items:center; }
-  .pdot { width:14px; height:14px; border-radius:50%; box-sizing:border-box; }
-  .pd-none .pdot { width:10px; height:10px; border:1.5px solid var(--ink-faint); opacity:.45; }
-  .pd-red .pdot { background:var(--prio-red); }
+  .row { display:grid; grid-template-columns:var(--tap) 1fr auto; align-items:center;
+    min-height:56px; padding:.35rem .25rem .35rem 0; border-bottom:1px solid var(--line); }
   .tick { height:var(--tap); display:grid; place-items:center; }
   .box { width:22px; height:22px; border:2.5px solid var(--pen); border-radius:6px; transition:background .15s; }
   .row.done .box { background:var(--pen); box-shadow:inset 0 0 0 3px var(--card); }
   .rbody { display:flex; align-items:baseline; gap:.6rem; min-width:0; }
   .name { flex:1; min-width:0; text-align:left; padding:0; font-size:1.06rem; font-weight:500; letter-spacing:-.01em;
-    color:var(--ink); line-height:1.3; overflow-wrap:anywhere; transition:color .2s ease; }
+    color:var(--ink); line-height:1.3; overflow-wrap:anywhere; transition:color .2s ease;
+    user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:pan-y; }
   .row.done .name { color:var(--ink-faint); text-decoration:line-through;
     text-decoration-color:var(--pen); text-decoration-thickness:2.5px; }
+  /* inline urgent marker, sits just after the name */
+  .udot { flex-shrink:0; align-self:center; width:10px; height:10px; border-radius:50%; background:var(--prio-red); }
   .name-input { flex:1; min-width:0; font-size:1.06rem; font-weight:500; padding:2px 6px;
     border:1px solid var(--pen); border-radius:var(--r-sm); background:var(--card); }
   .qty, .qty-input { font-family:var(--font-mono); font-size:.8rem; color:var(--ink-soft); flex-shrink:0; }
@@ -202,6 +197,32 @@ const html = htm.bind(h);
 
 /* --- config --------------------------------------------------------------- */
 const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+// Built-in vocabulary so typing finds words you've never added before, with
+// tidy spelling/capitalisation. Your own history always ranks ahead of these.
+const COMMON_ITEMS = [
+  'Apples','Bananas','Oranges','Lemons','Limes','Grapes','Strawberries','Blueberries','Raspberries','Avocado',
+  'Tomatoes','Potatoes','Onions','Garlic','Carrots','Broccoli','Cauliflower','Peppers','Cucumber','Lettuce',
+  'Spinach','Mushrooms','Courgette','Aubergine','Peas','Green beans','Sweetcorn','Celery','Leeks','Spring onions',
+  'Ginger','Chillies','Sweet potato','Cabbage','Kale','Melon','Pineapple','Pears','Peaches','Plums','Kiwi','Mango',
+  'Milk','Butter','Cheese','Cheddar','Eggs','Yoghurt','Cream','Double cream','Soured cream','Crème fraîche',
+  'Margarine','Mozzarella','Parmesan','Feta','Cottage cheese',
+  'Bread','Rolls','Bagels','Wraps','Pitta bread','Naan','Croissants','Crumpets','Baguette','Tortillas','Muffins',
+  'Chicken','Chicken breast','Beef mince','Mince','Steak','Sausages','Bacon','Ham','Pork','Turkey','Lamb',
+  'Salmon','Tuna','Cod','Prawns','Fish fingers',
+  'Rice','Pasta','Spaghetti','Noodles','Flour','Sugar','Salt','Pepper','Olive oil','Vegetable oil','Vinegar',
+  'Stock cubes','Baked beans','Chopped tomatoes','Tomato puree','Passata','Coconut milk','Lentils','Chickpeas',
+  'Kidney beans','Cereal','Porridge oats','Honey','Jam','Peanut butter','Marmite','Ketchup','Mayonnaise','Mustard',
+  'Brown sauce','Soy sauce','Gravy','Mixed herbs','Paprika','Cumin','Cinnamon','Curry powder','Oregano','Basil',
+  'Coffee','Tea bags','Hot chocolate','Biscuits','Crackers','Crisps','Chocolate','Nuts','Raisins','Baking powder',
+  'Icing sugar','Vanilla',
+  'Ice cream','Frozen peas','Chips','Pizza','Yorkshire puddings',
+  'Water','Orange juice','Apple juice','Squash','Lemonade','Cola','Beer','Wine',
+  'Washing up liquid','Washing powder','Fabric softener','Bin bags','Kitchen roll','Toilet roll','Cling film',
+  'Tin foil','Sponges','Bleach','Surface spray','Air freshener','Dishwasher tablets','Batteries','Light bulbs',
+  'Toothpaste','Toothbrush','Shampoo','Conditioner','Shower gel','Soap','Hand soap','Deodorant','Razors',
+  'Shaving foam','Moisturiser','Sun cream','Cotton wool','Cotton buds','Tissues','Wipes','Baby wipes','Nappies',
+  'Plasters','Paracetamol','Ibuprofen','Toilet cleaner','Sanitary pads','Tampons','Lip balm','Mouthwash',
+];
 const LIST_KIND = 30078;
 const LIST_NAME = 'groceries';
 const MAX_PLAINTEXT_BYTES = 48000;
@@ -393,7 +414,7 @@ class ListSync {
 /* --- controller ----------------------------------------------------------- */
 const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
     showSave: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
-    suggestions: [], toast: null, flashId: null };
+    suggestions: [], toast: null, flashId: null, helpOpen: false };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
 
@@ -488,6 +509,8 @@ async function boot() {
 const actions = {
   openSheet: () => store.set({ sheetOpen: true }),
   closeSheet: () => store.set({ sheetOpen: false }),
+  openHelp: () => store.set({ helpOpen: true }),
+  closeHelp: () => store.set({ helpOpen: false }),
   switchTo,
   createList: async () => {
     const id = createIdentity();
@@ -529,7 +552,9 @@ const actions = {
   add: (raw) => {
     if (!sync) return;
     const parts = (raw || '').split(',').map((x) => x.trim()).filter(Boolean);
-    for (const n of parts) addOne(n);
+    let added = false;
+    for (const n of parts) { if (addOne(n)) added = true; }
+    if (added) maybeHintUrgent();
   },
   toggle: (it) => sync?.mutate((s, c) => setChecked(s, c, it.id, !it.checked.v)),
   remove: (it) => {
@@ -559,11 +584,11 @@ const actions = {
 
 // --- toast + undo + flash -------------------------------------------------
 let pendingUndo = null; let toastTimer = null; let flashTimer = null;
-function showToast(msg, undoFn) {
+function showToast(msg, undoFn, ms) {
   pendingUndo = undoFn || null;
   store.set({ toast: { msg, canUndo: !!undoFn } });
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { pendingUndo = null; store.set({ toast: null }); }, undoFn ? 5000 : 1800);
+  toastTimer = setTimeout(() => { pendingUndo = null; store.set({ toast: null }); }, ms || (undoFn ? 5000 : 1800));
 }
 function flash(id) {
   store.set({ flashId: id });
@@ -576,9 +601,16 @@ function addOne(name) {
     // already here — if it was ticked off, bring it back; either way, flash it.
     if (existing.checked.v) sync.mutate((s, c) => setChecked(s, c, existing.id, false));
     flash(existing.id);
-    return;
+    return false;
   }
   sync.mutate((s, c) => addItem(s, c, { name }));
+  return true;
+}
+// Shown once ever (per device): teaches the hidden hold-to-flag gesture.
+async function maybeHintUrgent() {
+  if (await getMeta('hintUrgent')) return;
+  await setMeta('hintUrgent', true);
+  showToast('Tip: press and hold an item to flag it urgent', null, 5000);
 }
 
 /* --- UI ------------------------------------------------------------------- */
@@ -603,12 +635,13 @@ function ShareButton({ className, label, onDone }) {
   return html`<button class=${className} onClick=${go}>${label}</button>`;
 }
 
-function Chip({ name, onAdd }) {
+function Chip({ name, onAdd, canForget }) {
   const timer = useRef(null);
   const longFired = useRef(false);
   const startXY = useRef(null);
   const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
   const start = (e) => {
+    if (!canForget) return;
     longFired.current = false;
     startXY.current = { x: e.clientX, y: e.clientY };
     timer.current = setTimeout(() => {
@@ -622,9 +655,9 @@ function Chip({ name, onAdd }) {
     if (Math.abs(e.clientX - startXY.current.x) > 10 || Math.abs(e.clientY - startXY.current.y) > 10) clear();
   };
   const click = (e) => { if (longFired.current) { e.preventDefault(); longFired.current = false; return; } onAdd(); };
-  return html`<button class="chip" title=${'Add ' + name + ' — hold to remove'}
+  return html`<button class="chip" title=${canForget ? 'Add ' + name + ' — hold to remove' : 'Add ' + name}
     onPointerDown=${start} onPointerMove=${move} onPointerUp=${clear} onPointerLeave=${clear} onPointerCancel=${clear}
-    onContextMenu=${(e) => { e.preventDefault(); clear(); if (!longFired.current) { longFired.current = true; actions.forgetSuggestion(name); } }}
+    onContextMenu=${(e) => { if (!canForget) return; e.preventDefault(); clear(); if (!longFired.current) { longFired.current = true; actions.forgetSuggestion(name); } }}
     onClick=${click}><span class="plus">+</span>${name}</button>`;
 }
 
@@ -638,14 +671,25 @@ function ItemRow({ item, flash }) {
   const [nameDraft, setNameDraft] = useState('');
   const commitName = () => { setEditName(false); if (nameDraft.trim() && nameDraft.trim() !== item.name.v) actions.renameItem(item, nameDraft); };
 
+  // Tap the name to rename; hold it to toggle "urgent" (same gesture as chips).
+  const holdTimer = useRef(null);
+  const held = useRef(false);
+  const holdXY = useRef(null);
+  const holdCancel = () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; } };
+  const holdStart = (e) => {
+    held.current = false; holdXY.current = { x: e.clientX, y: e.clientY };
+    holdTimer.current = setTimeout(() => {
+      held.current = true; holdTimer.current = null;
+      if (navigator.vibrate) navigator.vibrate(15);
+      actions.toggleUrgent(item);
+    }, 500);
+  };
+  const holdMove = (e) => { if (holdXY.current && (Math.abs(e.clientX - holdXY.current.x) > 10 || Math.abs(e.clientY - holdXY.current.y) > 10)) holdCancel(); };
+  const nameClick = (e) => { if (held.current) { e.preventDefault(); held.current = false; return; } setNameDraft(item.name.v); setEditName(true); };
+
   const urgent = !done && (item.prio && item.prio.v) === 'red';
 
-  return html`<li class=${'row' + (done ? ' done' : '') + (flash ? ' flash' : '') + (urgent ? ' pr-red' : '')}>
-    ${done
-      ? html`<span class="prio"></span>`
-      : html`<button class=${'prio ' + (urgent ? 'pd-red' : 'pd-none')} onClick=${() => actions.toggleUrgent(item)}
-          aria-label=${urgent ? 'Urgent — tap to clear' : 'Mark urgent'} title=${urgent ? 'Urgent — tap to clear' : 'Mark urgent'}>
-          <span class="pdot"></span></button>`}
+  return html`<li class=${'row' + (done ? ' done' : '') + (flash ? ' flash' : '')}>
     <button class="tick" role="checkbox" aria-checked=${done}
       aria-label=${done ? 'Uncheck ' + item.name.v : 'Check off ' + item.name.v}
       onClick=${() => actions.toggle(item)}><span class="box"></span></button>
@@ -654,7 +698,11 @@ function ItemRow({ item, flash }) {
         ? html`<input class="name-input" autofocus value=${nameDraft} aria-label="Item name"
             onInput=${(e) => setNameDraft(e.target.value)} onBlur=${commitName}
             onKeyDown=${(e) => e.key === 'Enter' && commitName()} />`
-        : html`<button class="name" onClick=${() => { setNameDraft(item.name.v); setEditName(true); }}>${item.name.v}</button>`}
+        : html`<button class="name" title="Tap to rename · hold to flag urgent"
+            onPointerDown=${holdStart} onPointerMove=${holdMove} onPointerUp=${holdCancel}
+            onPointerLeave=${holdCancel} onPointerCancel=${holdCancel}
+            onContextMenu=${(e) => e.preventDefault()} onClick=${nameClick}>${item.name.v}</button>`}
+      ${urgent && html`<span class="udot" title="Urgent" aria-label="Urgent"></span>`}
       ${editing
         ? html`<input class="qty-input" autofocus value=${draft} placeholder="qty" aria-label="Quantity"
             onInput=${(e) => setDraft(e.target.value)} onBlur=${commit} onKeyDown=${(e) => e.key === 'Enter' && commit()} />`
@@ -662,6 +710,23 @@ function ItemRow({ item, flash }) {
     </div>
     <button class="del" aria-label=${'Remove ' + item.name.v} onClick=${() => actions.remove(item)}>×</button>
   </li>`;
+}
+
+// Empty field → recent history. Typing → matches from history + the built-in
+// dictionary, ranked: prefix matches first, personal (history) before common.
+function buildSuggestions(history, q, onList) {
+  if (!q) return history.filter((n) => !onList.has(n.toLowerCase())).slice(0, 12).map((n) => ({ name: n, personal: true }));
+  const seen = new Set(); const pool = [];
+  for (const n of history) { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); pool.push({ name: n, personal: true }); } }
+  for (const n of COMMON_ITEMS) { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); pool.push({ name: n, personal: false }); } }
+  const scored = [];
+  for (const p of pool) {
+    const k = p.name.toLowerCase();
+    if (onList.has(k) || k.indexOf(q) === -1) continue;
+    scored.push({ ...p, rank: (k.startsWith(q) ? 0 : 2) + (p.personal ? 0 : 1), len: p.name.length });
+  }
+  scored.sort((a, b) => a.rank - b.rank || a.len - b.len || a.name.localeCompare(b.name));
+  return scored.slice(0, 12);
 }
 
 function ListView() {
@@ -677,7 +742,10 @@ function ListView() {
     <header class="bar">
       <button class="brand" onClick=${actions.openSheet} aria-label="Switch list">
         <span class="mark">✓</span><h1>${s.activeName}</h1><span class="chev">▼</span></button>
-      <${ShareButton} className="share" label=${html`<span>Share</span>`} />
+      <div class="bar-right">
+        <button class="help-btn" onClick=${actions.openHelp} aria-label="Help and how it works">?</button>
+        <${ShareButton} className="share" label=${html`<span>Share</span>`} />
+      </div>
     </header>
     <div class=${'status' + (s.status.error ? ' err' : s.status.online && !s.status.pending ? ' live' : '')}>
       <span class="dot"></span>${label}</div>
@@ -695,13 +763,10 @@ function ListView() {
     </form>
     ${(() => {
       const onList = new Set(s.items.map((i) => i.name.v.toLowerCase()));
-      const q = draft.trim().toLowerCase();
-      const sugg = (s.suggestions || [])
-        .filter((n) => !onList.has(n.toLowerCase()))
-        .filter((n) => !q || n.toLowerCase().includes(q))
-        .slice(0, 12);
+      const sugg = buildSuggestions(s.suggestions || [], draft.trim().toLowerCase(), onList);
       return sugg.length > 0 && html`<div class="suggests">
-        ${sugg.map((n) => html`<${Chip} key=${n} name=${n} onAdd=${() => { actions.add(n); setDraft(''); }} />`)}
+        ${sugg.map((sg) => html`<${Chip} key=${sg.name} name=${sg.name} canForget=${sg.personal}
+          onAdd=${() => { actions.add(sg.name); setDraft(''); }} />`)}
       </div>`;
     })()}
     <main>
