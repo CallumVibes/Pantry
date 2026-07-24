@@ -681,7 +681,7 @@ function Help() {
         <button class="dismiss" aria-label="Close" onClick=${actions.closeHelp}>×</button></div>
       <ul class="help-list">
         <li><b>Add items.</b> Type and tap Add. Add several at once with commas — <i>milk, eggs, bread</i>.</li>
-        <li><b>Suggestions.</b> As you type, tap a suggestion to add it. Hold one of your own past items to remove it from the suggestions.</li>
+        <li><b>Suggestions.</b> As you type, tap a suggestion to add it, or press and hold one to hide it.</li>
         <li><b>Tick off.</b> Tap the box as you shop. Done items drop into “In the basket”; tap <b>Clear</b> to empty it.</li>
         <li><b>Quantity.</b> Tap “+ qty” next to an item to note how many.</li>
         <li><b>Rename.</b> Tap an item’s name to edit it.</li>
@@ -753,17 +753,18 @@ function ItemRow({ item, flash }) {
   </li>`;
 }
 
-// Empty field → recent history. Typing → matches from history + the built-in
-// dictionary, ranked: prefix matches first, personal (history) before common.
-function buildSuggestions(history, q, onList) {
-  if (!q) return history.filter((n) => !onList.has(n.toLowerCase())).slice(0, 12).map((n) => ({ name: n, personal: true }));
+// Empty field → recent history (minus anything already on the list). Typing →
+// matches from history + dictionary, hiding only items that are ACTIVE on the
+// list; basket (checked) items still surface so you can find and re-add them.
+function buildSuggestions(history, q, excludeAll, excludeActive) {
+  if (!q) return history.filter((n) => !excludeAll.has(n.toLowerCase())).slice(0, 12).map((n) => ({ name: n, personal: true }));
   const seen = new Set(); const pool = [];
   for (const n of history) { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); pool.push({ name: n, personal: true }); } }
   for (const n of COMMON_ITEMS) { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); pool.push({ name: n, personal: false }); } }
   const scored = [];
   for (const p of pool) {
     const k = p.name.toLowerCase();
-    if (onList.has(k) || k.indexOf(q) === -1) continue;
+    if (excludeActive.has(k) || k.indexOf(q) === -1) continue;
     scored.push({ ...p, rank: (k.startsWith(q) ? 0 : 2) + (p.personal ? 0 : 1), len: p.name.length });
   }
   scored.sort((a, b) => a.rank - b.rank || a.len - b.len || a.name.localeCompare(b.name));
@@ -803,8 +804,9 @@ function ListView() {
       <button class="add-btn" type="submit" disabled=${!draft.trim()} aria-label="Add">Add</button>
     </form>
     ${(() => {
-      const onList = new Set(s.items.map((i) => i.name.v.toLowerCase()));
-      const sugg = buildSuggestions(s.suggestions || [], draft.trim().toLowerCase(), onList);
+      const all = new Set(s.items.map((i) => i.name.v.toLowerCase()));
+      const active = new Set(s.items.filter((i) => !i.checked.v).map((i) => i.name.v.toLowerCase()));
+      const sugg = buildSuggestions(s.suggestions || [], draft.trim().toLowerCase(), all, active);
       return sugg.length > 0 && html`<div class="suggests">
         ${sugg.map((sg) => html`<${Chip} key=${sg.name} name=${sg.name} canForget=${sg.personal}
           onAdd=${() => { actions.add(sg.name); setDraft(''); }} />`)}
