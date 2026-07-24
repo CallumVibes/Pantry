@@ -159,6 +159,19 @@
     user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:pan-x; }
   .chip:hover { border-color:var(--pen); }
   .chip .plus { color:var(--pen); font-weight:700; margin-right:.28rem; }
+
+  .bar-right { display:flex; align-items:center; gap:.5rem; }
+  .help-btn { width:38px; height:38px; border-radius:999px; background:var(--card); border:2px solid var(--card-edge);
+    font-weight:700; font-size:1rem; color:var(--ink-soft); flex-shrink:0; }
+  .help-btn:hover { border-color:var(--pen); color:var(--pen-ink); }
+  .help-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+  .help-list { list-style:none; margin:.5rem 0 0; padding:0; }
+  .help-list li { padding:.6rem 0; border-bottom:1px solid var(--line); line-height:1.5; font-size:.98rem; color:var(--ink); }
+  .help-list b { font-weight:600; }
+  .help-list i { font-style:normal; font-family:var(--font-mono); font-size:.85rem; color:var(--ink-soft); }
+  .help-section { margin-top:1.4rem; padding-top:1.1rem; border-top:2px solid var(--card-edge); }
+  .help-section h3 { font-size:1.05rem; font-weight:700; margin:0 0 .7rem; }
+  .help-section p { margin:0 0 .75rem; line-height:1.55; font-size:.95rem; color:var(--ink); }
 </style>
 </head>
 <body>
@@ -661,6 +674,34 @@ function Chip({ name, onAdd, canForget }) {
     onClick=${click}><span class="plus">+</span>${name}</button>`;
 }
 
+function Help() {
+  return html`<div class="sheet-overlay" onClick=${(e) => { if (e.target.classList.contains('sheet-overlay')) actions.closeHelp(); }}>
+    <div class="sheet help">
+      <div class="help-head"><h2>How to use Pantry</h2>
+        <button class="dismiss" aria-label="Close" onClick=${actions.closeHelp}>×</button></div>
+      <ul class="help-list">
+        <li><b>Add items.</b> Type and tap Add. Add several at once with commas — <i>milk, eggs, bread</i>.</li>
+        <li><b>Suggestions.</b> As you type, tap a suggestion to add it. Hold one of your own past items to remove it from the suggestions.</li>
+        <li><b>Tick off.</b> Tap the box as you shop. Done items drop into “In the basket”; tap <b>Clear</b> to empty it.</li>
+        <li><b>Quantity.</b> Tap “+ qty” next to an item to note how many.</li>
+        <li><b>Rename.</b> Tap an item’s name to edit it.</li>
+        <li><b>Mark urgent.</b> Press and <b>hold</b> an item’s name — it gets a red dot and jumps to the top.</li>
+        <li><b>Undo.</b> Removing an item or clearing the basket shows an Undo button for a few seconds.</li>
+        <li><b>Share.</b> Tap Share to send the list to your family. Whoever opens the link joins the same list.</li>
+        <li><b>More lists.</b> Tap the list name at the top to switch between lists, rename them, or add a new one.</li>
+      </ul>
+      <div class="help-section">
+        <h3>How it works</h3>
+        <p>Your list lives on <b>nostr</b>, an open network of relays — there’s no company server holding your shopping, and no account to sign up for.</p>
+        <p>Sharing the link shares the key to the list. The key sits after the “#” in the link, which your browser never sends to whoever hosts the page — so the host can’t read it either.</p>
+        <p>Because everyone shares one key, <b>anyone with the link can view and edit</b> the list. That’s the trade-off for joining with zero setup, and it’s fine for a family shopping list.</p>
+        <p>The list is encrypted on the network, keeps working with no signal in the shop, and installs to your home screen like a normal app.</p>
+        <p><b>Keep the link.</b> It’s how you share the list and how you get back to it — save it somewhere safe, like a pinned family chat message.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
 function ItemRow({ item, flash }) {
   const done = item.checked.v;
   const [editing, setEditing] = useState(false);   // quantity
@@ -842,7 +883,7 @@ function App() {
   const s = useStore();
   if (s.screen === 'loading') return html`<div class="boot"><span class="mark">✓</span></div>`;
   if (s.screen === 'welcome') return html`<div><${Welcome} /><${Toast} /></div>`;
-  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}<${Toast} /></div>`;
+  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}${s.helpOpen && html`<${Help} />`}<${Toast} /></div>`;
 }
 
 try { render(html`<${App} />`, document.getElementById('app')); boot(); }
