@@ -315,8 +315,6 @@ const setName = (s, c, id, v) => setFields(s, c, id, { name: v.trim() });
 const setPrio = (s, c, id, v) => setFields(s, c, id, { prio: v });
 const removeItem = (s, c, id) => setFields(s, c, id, { deleted: true });
 const restoreItem = (s, c, id) => setFields(s, c, id, { deleted: false });
-function clearChecked(s, c) { let out = s;
-  for (const i of Object.values(s.items)) if (i.checked.v && !i.deleted.v) out = removeItem(out, c, i.id); return out; }
 // One flag: urgent (red) or not. Urgent unchecked items rise to the top;
 // checked items always sink below, and their priority is ignored.
 const isUrgent = (i) => (i.prio && i.prio.v) === 'red';
