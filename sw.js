@@ -16,7 +16,7 @@
  * Bump CACHE_VERSION to force clients onto a new app shell.
  */
 
-const CACHE_VERSION = 'v15';
+const CACHE_VERSION = 'v16';
 const SHELL = `shell-${CACHE_VERSION}`;
 const RUNTIME = `runtime-${CACHE_VERSION}`;
 

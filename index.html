@@ -50,6 +50,8 @@
   .primary:disabled { opacity:.4; }
   .primary:not(:disabled):hover { background:var(--pen-ink); }
   .subtle { text-align:center; color:var(--ink-faint); font-size:.9rem; margin:.2rem 0 0; line-height:1.5; }
+  .linkish { align-self:center; color:var(--pen-ink); font-size:.92rem; font-weight:600; padding:.4rem; }
+  .linkish:hover { text-decoration:underline; }
 
   /* list */
   .bar { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem .4rem; }
@@ -831,12 +833,26 @@ function ListView() {
 }
 
 function Welcome() {
+  const [joinMode, setJoinMode] = useState(false);
+  const [joinText, setJoinText] = useState('');
+  const doJoin = async () => {
+    if (!joinText.trim()) return;
+    const r = await actions.joinFromText(joinText);
+    if (r === 'bad') actions.showToast("That link didn't work — check you copied all of it");
+    // on success the controller switches to the list automatically
+  };
   return html`<div class="wrap">
     <div class="hero"><span class="mark">✓</span>
       <h1>Your family<br/>shopping list.</h1>
       <p class="lede">One list everyone at home can add to. Start it here, then share the link with your family.</p></div>
     <button class="primary" onClick=${actions.createList}>Start the list</button>
     <p class="subtle">Got a link from someone at home? Just open it — you’ll join their list automatically.</p>
+    ${joinMode
+      ? html`<div class="join-row">
+          <input class="join-input" autofocus placeholder="Paste the link here" value=${joinText}
+            onInput=${(e) => setJoinText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && doJoin()} />
+          <button class="primary sm" onClick=${doJoin}>Join</button></div>`
+      : html`<button class="linkish" onClick=${() => setJoinMode(true)}>Or paste a link instead</button>`}
   </div>`;
 }
 
