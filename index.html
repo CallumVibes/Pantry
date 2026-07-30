@@ -221,7 +221,7 @@ clearTimeout(window.__bootTimer);
 const html = htm.bind(h);
 
 /* --- config --------------------------------------------------------------- */
-const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.ditto.pub/'];
 // Built-in vocabulary so typing finds words you've never added before, with
 // tidy spelling/capitalisation. Your own history always ranks ahead of these.
 const COMMON_ITEMS = [
@@ -820,7 +820,7 @@ function ListView() {
   useEffect(() => { if (s.pendingAdd) setDraft(s.pendingAdd); }, [s.pendingAdd]);
   const open = s.items.filter((i) => !i.checked.v);
   const done = s.items.filter((i) => i.checked.v);
-  const label = s.status.error ? 'offline — changes saved here'
+  const label = s.status.error ? 'offline — changes saved on your phone'
     : s.status.pending ? 'saving…' : s.status.online ? 'up to date' : 'connecting…';
   const submit = (e) => { e.preventDefault(); actions.add(draft); setDraft(''); };
   return html`<div>
