@@ -177,6 +177,12 @@
   .help-credit { text-align:center; color:var(--ink-faint); font-size:.88rem; margin:1.5rem 0 .3rem; }
   .help-credit a { color:var(--pen-ink); font-weight:600; text-decoration:none; }
   .help-credit a:hover { text-decoration:underline; }
+  .share-sheet .note { margin:.2rem 0 1rem; }
+  .qr { margin:0 0 1.2rem; display:grid; justify-items:center; }
+  .qr img, .qr-ph { width:240px; height:240px; border-radius:var(--r-md); background:#fff; padding:12px; box-shadow:var(--shadow-card); }
+  .qr-ph { background:repeating-linear-gradient(45deg,#f1f1ec,#f1f1ec 8px,#e8e8e2 8px,#e8e8e2 16px); }
+  .share-actions { display:flex; flex-direction:column; gap:.6rem; }
+  .share-actions .primary, .share-actions .ghost { height:50px; }
 </style>
 </head>
 <body>
@@ -208,6 +214,7 @@ import * as nip19 from 'https://esm.sh/nostr-tools@2.10.4/nip19';
 import { v2 as nip44v2 } from 'https://esm.sh/nostr-tools@2.10.4/nip44';
 import { sha256 } from 'https://esm.sh/@noble/hashes@1.4.0/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes } from 'https://esm.sh/@noble/hashes@1.4.0/utils';
+import QRCode from 'https://esm.sh/qrcode@1.5.4';
 
 window.__booted = true;
 clearTimeout(window.__bootTimer);
@@ -438,7 +445,7 @@ class ListSync {
 /* --- controller ----------------------------------------------------------- */
 const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
     showSave: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
-    suggestions: [], toast: null, flashId: null, helpOpen: false };
+    suggestions: [], toast: null, flashId: null, helpOpen: false, shareOpen: false };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
 
@@ -560,13 +567,19 @@ const actions = {
         pushHouseholds(); store.set({ screen: 'welcome', sheetOpen: false, items: [] }); }
     } else { pushHouseholds(); }
   },
-  shareLink: async () => {
-    const url = location.origin + location.pathname + '#k=' + identity.nsec;
+  getShareUrl: () => location.origin + location.pathname + '#k=' + identity.nsec,
+  openShare: () => store.set({ shareOpen: true, showSave: false }),
+  closeShare: () => store.set({ shareOpen: false }),
+  copyLink: async () => {
+    try { await navigator.clipboard.writeText(actions.getShareUrl()); showToast('Link copied — send it to your family'); }
+    catch { showToast('Could not copy the link'); }
+  },
+  nativeShare: async () => {
+    const url = actions.getShareUrl();
     try {
-      if (navigator.share) { await navigator.share({ title: 'Our shopping list', text: 'Open our shared shopping list', url }); return 'shared'; }
-      await navigator.clipboard.writeText(url); return 'copied';
-    } catch (e) { if (String(e).includes('Abort')) return 'shared';
-      try { await navigator.clipboard.writeText(url); return 'copied'; } catch { return 'fail'; } }
+      if (navigator.share) { await navigator.share({ title: 'Our shopping list', text: 'Open our shared shopping list', url }); return; }
+      await navigator.clipboard.writeText(url); showToast('Link copied — send it to your family');
+    } catch (e) { if (!String(e).includes('Abort')) { try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch {} } }
   },
   dismissSave: () => store.set({ showSave: false }),
   showToast,
@@ -649,14 +662,32 @@ function Toast() {
   </div>`;
 }
 
-function ShareButton({ className, label, onDone }) {
-  const go = async () => {
-    const r = await actions.shareLink();
-    if (r === 'copied') { actions.showToast('Link copied — send it to your family'); }
-    else if (r === 'fail') { actions.showToast('Could not share'); }
-    onDone?.();
-  };
-  return html`<button class=${className} onClick=${go}>${label}</button>`;
+function ShareButton({ className, label }) {
+  return html`<button class=${className} onClick=${actions.openShare}>${label}</button>`;
+}
+
+function ShareSheet() {
+  const [url] = useState(actions.getShareUrl());
+  const [qr, setQr] = useState('');
+  useEffect(() => {
+    QRCode.toDataURL(url, { width: 320, margin: 1, errorCorrectionLevel: 'M' }).then(setQr).catch(() => {});
+  }, [url]);
+  const hasNative = typeof navigator !== 'undefined' && !!navigator.share;
+  return html`<div class="sheet-overlay" onClick=${(e) => { if (e.target.classList.contains('sheet-overlay')) actions.closeShare(); }}>
+    <div class="sheet share-sheet">
+      <div class="help-head"><h2>Share this list</h2>
+        <button class="dismiss" aria-label="Close" onClick=${actions.closeShare}>×</button></div>
+      <p class="note">Scan this with a phone camera, or send the link — either way, they join the same list.</p>
+      <figure class="qr">
+        ${qr ? html`<img src=${qr} width="240" height="240" alt="QR code to join this list" />`
+             : html`<div class="qr-ph" aria-hidden="true"></div>`}
+      </figure>
+      <div class="share-actions">
+        <button class="primary" onClick=${actions.copyLink}>Copy link</button>
+        ${hasNative && html`<button class="ghost" onClick=${actions.nativeShare}>Share…</button>`}
+      </div>
+    </div>
+  </div>`;
 }
 
 function Chip({ name, onAdd, canForget }) {
@@ -806,7 +837,7 @@ function ListView() {
 
     ${s.showSave && html`<div class="banner">
       <p>Share this list with your family so everyone can add to it — and so you don’t lose it.</p>
-      <${ShareButton} className="b-share" label="Share" onDone=${actions.dismissSave} />
+      <${ShareButton} className="b-share" label="Share" />
       <button class="dismiss" aria-label="Dismiss" onClick=${actions.dismissSave}>×</button>
     </div>`}
 
@@ -911,7 +942,7 @@ function App() {
   const s = useStore();
   if (s.screen === 'loading') return html`<div class="boot"><span class="mark">✓</span></div>`;
   if (s.screen === 'welcome') return html`<div><${Welcome} /><${Toast} /></div>`;
-  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}${s.helpOpen && html`<${Help} />`}<${Toast} /></div>`;
+  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}${s.helpOpen && html`<${Help} />`}${s.shareOpen && html`<${ShareSheet} />`}<${Toast} /></div>`;
 }
 
 try { render(html`<${App} />`, document.getElementById('app')); boot(); }
