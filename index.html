@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <meta name="theme-color" content="#eef0ea" />
-<meta name="description" content="A shared family shopping list." />
+<meta name="description" content="A shared shopping list anyone you shop with can add to." />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Pantry" />
@@ -596,7 +596,7 @@ const actions = {
   openShare: () => store.set({ shareOpen: true, showSave: false }),
   closeShare: () => store.set({ shareOpen: false }),
   copyLink: async () => {
-    try { await navigator.clipboard.writeText(actions.getShareUrl()); await markActiveSaved(); showToast('Link copied — send it to your family'); }
+    try { await navigator.clipboard.writeText(actions.getShareUrl()); await markActiveSaved(); showToast('Link copied — send it to whoever you’re sharing with'); }
     catch { showToast('Could not copy the link'); }
   },
   emailLink: async () => {
@@ -610,7 +610,7 @@ const actions = {
     const url = actions.getShareUrl();
     try {
       if (navigator.share) { await navigator.share({ title: 'Our shopping list', text: 'Open our shared shopping list', url }); await markActiveSaved(); return; }
-      await navigator.clipboard.writeText(url); await markActiveSaved(); showToast('Link copied — send it to your family');
+      await navigator.clipboard.writeText(url); await markActiveSaved(); showToast('Link copied — send it to whoever you’re sharing with');
     } catch (e) { if (!String(e).includes('Abort')) { try { await navigator.clipboard.writeText(url); await markActiveSaved(); showToast('Link copied'); } catch {} } }
   },
   dismissSave: () => store.set({ showSave: false }),
@@ -632,7 +632,7 @@ const actions = {
     for (const n of parts) { if (addOne(n)) added = true; }
     if (added) maybeHintUrgent();
   },
-  toggle: (it) => sync?.mutate((s, c) => setChecked(s, c, it.id, !it.checked.v)),
+  toggle: (it) => { const willCheck = !it.checked.v; sync?.mutate((s, c) => setChecked(s, c, it.id, willCheck)); if (willCheck) maybeHintGotIt(); },
   remove: (it) => {
     const id = it.id, name = it.name.v;
     sync?.mutate((s, c) => removeItem(s, c, id));
@@ -687,6 +687,15 @@ async function maybeHintUrgent() {
   if (await getMeta('hintUrgent')) return;
   await setMeta('hintUrgent', true);
   showToast('Tip: press and hold an item to flag it urgent', null, 5000);
+}
+async function maybeHintGotIt() {
+  if (await getMeta('hintGotIt')) return;                 // already shown, done
+  if (!(await getMeta('gotItSeenOnce'))) {                // first check-off: stay quiet
+    await setMeta('gotItSeenOnce', true);
+    return;
+  }
+  await setMeta('hintGotIt', true);                       // second check-off: now teach it
+  showToast('Tip: untick something in “Got it” to put it back on the list', null, 5000);
 }
 
 /* --- UI ------------------------------------------------------------------- */
@@ -764,12 +773,12 @@ function Help() {
       <ul class="help-list">
         <li><b>Add items.</b> Type and tap Add. Add several at once with commas — <i>milk, tofu, bread</i>.</li>
         <li><b>Suggestions.</b> As you type, tap a suggestion to add it, or press and hold one to hide it.</li>
-        <li><b>Tick off.</b> Tap the box as you shop. Done items drop into “In the basket”; tap <b>Clear</b> to empty it.</li>
+        <li><b>Tick off.</b> Tap the box as you shop. Done items drop into “Got it”. Notice you need something again? Untick it there to put it back on the list. Tap <b>Clear</b> to empty it.</li>
         <li><b>Quantity.</b> Tap “+ qty” next to an item to note how many.</li>
         <li><b>Rename.</b> Tap an item’s name to edit it.</li>
         <li><b>Mark urgent.</b> Press and <b>hold</b> an item’s name — it gets a red dot and jumps to the top.</li>
-        <li><b>Undo.</b> Removing an item or clearing the basket shows an Undo button for a few seconds.</li>
-        <li><b>Share.</b> Tap Share to send the list to your family. Whoever opens the link joins the same list.</li>
+        <li><b>Undo.</b> Removing an item or clearing “Got it” shows an Undo button for a few seconds.</li>
+        <li><b>Share.</b> Tap Share to send the list to whoever you share with. Whoever opens the link joins the same list.</li>
         <li><b>Back up.</b> A blue dot means you haven’t saved this list’s link yet. Open Share and copy or email it to yourself — if this phone ever forgets the list, that link is the only way back to it.</li>
         <li><b>More lists.</b> Tap the list name at the top to switch between lists, rename them, or add a new one.</li>
       </ul>
@@ -777,9 +786,9 @@ function Help() {
         <h3>How it works</h3>
         <p>Your list lives on <b>nostr</b>, an open network of relays — there’s no company server holding your shopping, and no account to sign up for.</p>
         <p>Sharing the link shares the key to the list. The key sits after the “#” in the link, which your browser never sends to whoever hosts the page — so the host can’t read it either.</p>
-        <p>Because everyone shares one key, <b>anyone with the link can view and edit</b> the list. That’s the trade-off for joining with zero setup, and it’s fine for a family shopping list.</p>
+        <p>Because everyone shares one key, <b>anyone with the link can view and edit</b> the list. That’s the trade-off for joining with zero setup, and it’s fine for a shared shopping list.</p>
         <p>The list is encrypted on the network, keeps working with no signal in the shop, and installs to your home screen like a normal app.</p>
-        <p><b>Keep the link.</b> It’s how you share the list and how you get back to it — save it somewhere safe, like a pinned family chat message.</p>
+        <p><b>Keep the link.</b> It’s how you share the list and how you get back to it — save it somewhere safe, like a pinned chat message.</p>
       </div>
       <p class="help-credit">Vibed with 🧡 by <a href="https://primal.net/p/nprofile1qqs2qv26p0uq54mrujna2th52t9pz0c5pkk3h4r5k3jslmltgw08xhqkrvc2j" target="_blank" rel="noopener noreferrer">Callum</a></p>
     </div>
@@ -892,7 +901,7 @@ function ListView() {
       <span class="dot"></span>${label}</div>
 
     ${s.showSave && html`<div class="banner">
-      <p>Share this list with your family so everyone can add to it — and so you don’t lose it.</p>
+      <p>Share this list so everyone you shop with can add to it — and so you don’t lose it.</p>
       <${ShareButton} className="b-share" label="Share" />
       <button class="dismiss" aria-label="Dismiss" onClick=${actions.dismissSave}>×</button>
     </div>`}
@@ -918,7 +927,7 @@ function ListView() {
         ? html`<div class="empty"><p class="empty-head">Nothing on the list yet.</p>
             <p class="empty-sub">Add the first thing above. Everyone you share the list with sees it.</p></div>`
         : html`<ul class="items">${open.map((it) => html`<${ItemRow} key=${it.id} item=${it} flash=${it.id === s.flashId} />`)}</ul>
-            ${done.length > 0 && html`<div class="done-head"><span>In the basket · ${done.length}</span>
+            ${done.length > 0 && html`<div class="done-head"><span>Got it · ${done.length}</span>
               <button class="clear" onClick=${actions.clearChecked}>Clear</button></div>
               <ul class="items">${done.map((it) => html`<${ItemRow} key=${it.id} item=${it} flash=${it.id === s.flashId} />`)}</ul>`}`}
     </main>
@@ -936,8 +945,8 @@ function Welcome() {
   };
   return html`<div class="wrap">
     <div class="hero"><span class="mark">✓</span>
-      <h1>Your family<br/>shopping list.</h1>
-      <p class="lede">One list everyone at home can add to. Start it here, then share the link with your family.</p></div>
+      <h1>Your shared<br/>shopping list.</h1>
+      <p class="lede">One list everyone can add to. Start it here, then send the link to whoever you shop with.</p></div>
     <button class="primary" onClick=${actions.createList}>Start the list</button>
     <p class="subtle">Got a link from someone at home? Just open it — you’ll join their list automatically.</p>
     ${joinMode

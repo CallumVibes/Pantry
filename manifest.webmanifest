@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Pantry",
   "short_name": "Pantry",
-  "description": "A shared family shopping list.",
+  "description": "A shared shopping list anyone you shop with can add to.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
