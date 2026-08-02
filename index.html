@@ -64,6 +64,8 @@
   .status { display:flex; align-items:center; gap:.4rem; padding:0 1.2rem .7rem;
     font-family:var(--font-mono); font-size:.72rem; color:var(--ink-soft); }
   .status .dot { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); }
+  .nb-dot { width:7px; height:7px; border-radius:50%; background:var(--pen); display:inline-block; flex:none; }
+  .hh .nb-dot { margin-left:.35rem; }
   .status.live .dot { background:var(--fresh); }
   .status.err { color:var(--alert); } .status.err .dot { background:var(--alert); }
 
@@ -444,7 +446,7 @@ class ListSync {
 
 /* --- controller ----------------------------------------------------------- */
 const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
-    showSave: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
+    showSave: false, canInstall: false, iosInstall: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
     suggestions: [], toast: null, flashId: null, helpOpen: false, shareOpen: false };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
@@ -453,12 +455,35 @@ let sync = null; let identity = null;
 let households = [];   // [{ id: npub, name, sk: hex }]
 let activeId = null;
 
+// --- install nudge --------------------------------------------------------
+// Android fires beforeinstallprompt (we defer it and offer a real button).
+// iOS has no such event, so we show Share → Add to Home Screen instructions.
+// Installing is the main thing that stops iOS clearing the list after 7 days.
+let deferredInstall = null; let installDismissed = false;
+function markInstallDismissed() { installDismissed = true; setMeta('installDismissed', true); }
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; if (!installDismissed) store.set({ canInstall: true }); });
+addEventListener('appinstalled', () => { deferredInstall = null; store.set({ canInstall: false, iosInstall: false }); markInstallDismissed(); });
+async function setupInstall() {
+  installDismissed = (await getMeta('installDismissed')) === true;
+  if (installDismissed) { store.set({ canInstall: false, iosInstall: false }); return; }
+  const standalone = navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (standalone) return;                       // already installed — nothing to nudge
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) store.set({ iosInstall: true });
+  if (deferredInstall) store.set({ canInstall: true });
+}
+
 function pushHouseholds() {
   const active = households.find((h) => h.id === activeId);
-  store.set({ households: households.map((h) => ({ id: h.id, name: h.name })), activeId,
+  store.set({ households: households.map((h) => ({ id: h.id, name: h.name, saved: h.saved })), activeId,
     activeName: active ? active.name : 'Pantry' });
 }
 const persist = () => Promise.all([setMeta('households', households), setMeta('activeId', activeId)]);
+// Marks the active list as backed up once its link has actually left the device
+// (copied, emailed, or shared). Persists so the reminder doesn't come back.
+async function markActiveSaved() {
+  const h = households.find((x) => x.id === activeId);
+  if (h && h.saved !== true) { h.saved = true; await persist(); pushHouseholds(); }
+}
 function nextName(base) {
   const names = new Set(households.map((h) => h.name));
   if (!names.has(base)) return base;
@@ -497,7 +522,7 @@ async function joinKey(nsecOrKey, defaultName) {
   const id = parseNsec(nsecOrKey);            // throws if invalid
   const existing = households.find((h) => h.id === id.npub);
   if (existing) { await switchTo(existing.id); return 'switched'; }
-  households.push({ id: id.npub, name: nextName(defaultName || 'Shared list'), sk: bytesToHex(id.sk) });
+  households.push({ id: id.npub, name: nextName(defaultName || 'Shared list'), sk: bytesToHex(id.sk), saved: true });
   await persist();
   await switchTo(id.npub);
   return 'joined';
@@ -516,7 +541,7 @@ async function boot() {
   const legacy = await getMeta('sk');
   if (legacy && households.length === 0) {
     const id = identityFrom(hexToBytes(legacy));
-    households = [{ id: id.npub, name: 'My list', sk: legacy }];
+    households = [{ id: id.npub, name: 'My list', sk: legacy, saved: true }];
     activeId = id.npub; await persist(); await delMeta('sk');
   }
 
@@ -545,7 +570,7 @@ const actions = {
   switchTo,
   createList: async () => {
     const id = createIdentity();
-    households.push({ id: id.npub, name: nextName('New list'), sk: bytesToHex(id.sk) });
+    households.push({ id: id.npub, name: nextName('New list'), sk: bytesToHex(id.sk), saved: false });
     await persist();
     await switchTo(id.npub);
     store.set({ showSave: true });
@@ -571,17 +596,31 @@ const actions = {
   openShare: () => store.set({ shareOpen: true, showSave: false }),
   closeShare: () => store.set({ shareOpen: false }),
   copyLink: async () => {
-    try { await navigator.clipboard.writeText(actions.getShareUrl()); showToast('Link copied — send it to your family'); }
+    try { await navigator.clipboard.writeText(actions.getShareUrl()); await markActiveSaved(); showToast('Link copied — send it to your family'); }
     catch { showToast('Could not copy the link'); }
+  },
+  emailLink: async () => {
+    const url = actions.getShareUrl();
+    const subject = encodeURIComponent('pantrylist.net backup');
+    const body = encodeURIComponent(`Keep this link — it's how you get back into your list:\n\n${url}\n`);
+    await markActiveSaved();
+    location.href = `mailto:?subject=${subject}&body=${body}`;
   },
   nativeShare: async () => {
     const url = actions.getShareUrl();
     try {
-      if (navigator.share) { await navigator.share({ title: 'Our shopping list', text: 'Open our shared shopping list', url }); return; }
-      await navigator.clipboard.writeText(url); showToast('Link copied — send it to your family');
-    } catch (e) { if (!String(e).includes('Abort')) { try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch {} } }
+      if (navigator.share) { await navigator.share({ title: 'Our shopping list', text: 'Open our shared shopping list', url }); await markActiveSaved(); return; }
+      await navigator.clipboard.writeText(url); await markActiveSaved(); showToast('Link copied — send it to your family');
+    } catch (e) { if (!String(e).includes('Abort')) { try { await navigator.clipboard.writeText(url); await markActiveSaved(); showToast('Link copied'); } catch {} } }
   },
   dismissSave: () => store.set({ showSave: false }),
+  install: async () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    try { await deferredInstall.userChoice; } catch {}
+    deferredInstall = null; store.set({ canInstall: false }); // one-shot event; hide after use
+  },
+  dismissInstall: () => { store.set({ canInstall: false, iosInstall: false }); markInstallDismissed(); },
   showToast,
   undo: () => { const fn = pendingUndo; pendingUndo = null; store.set({ toast: null }); if (fn) fn(); },
   // "milk, eggs, bread" → three items. Skips anything already on the list
@@ -684,6 +723,7 @@ function ShareSheet() {
       </figure>
       <div class="share-actions">
         <button class="primary" onClick=${actions.copyLink}>Copy link</button>
+        <button class="ghost" onClick=${actions.emailLink}>Email myself the link (backup)</button>
         ${hasNative && html`<button class="ghost" onClick=${actions.nativeShare}>Share…</button>`}
       </div>
     </div>
@@ -730,6 +770,7 @@ function Help() {
         <li><b>Mark urgent.</b> Press and <b>hold</b> an item’s name — it gets a red dot and jumps to the top.</li>
         <li><b>Undo.</b> Removing an item or clearing the basket shows an Undo button for a few seconds.</li>
         <li><b>Share.</b> Tap Share to send the list to your family. Whoever opens the link joins the same list.</li>
+        <li><b>Back up.</b> A blue dot means you haven’t saved this list’s link yet. Open Share and copy or email it to yourself — if this phone ever forgets the list, that link is the only way back to it.</li>
         <li><b>More lists.</b> Tap the list name at the top to switch between lists, rename them, or add a new one.</li>
       </ul>
       <div class="help-section">
@@ -814,6 +855,18 @@ function buildSuggestions(history, q, excludeAll, excludeActive) {
   return scored.slice(0, 12);
 }
 
+function InstallBanner() {
+  const s = useStore();
+  if (!s.canInstall && !s.iosInstall) return null;
+  return html`<div class="banner">
+    ${s.canInstall
+      ? html`<p>Install Pantry so it opens like an app — and your list won’t get cleared.</p>
+             <button class="b-share" onClick=${actions.install}>Install</button>`
+      : html`<p>Add Pantry to your home screen so your list doesn’t get cleared: tap <b>Share</b>, then <b>Add to Home Screen</b>.</p>`}
+    <button class="dismiss" aria-label="Dismiss" onClick=${actions.dismissInstall}>×</button>
+  </div>`;
+}
+
 function ListView() {
   const s = useStore();
   const [draft, setDraft] = useState(s.pendingAdd || '');
@@ -826,7 +879,10 @@ function ListView() {
   return html`<div>
     <header class="bar">
       <button class="brand" onClick=${actions.openSheet} aria-label="Switch list">
-        <span class="mark">✓</span><h1>${s.activeName}</h1><span class="chev">▼</span></button>
+        <span class="mark">✓</span><h1>${s.activeName}</h1>
+        ${(s.households.find((h) => h.id === s.activeId) || {}).saved === false
+          && html`<span class="nb-dot" title="Not saved yet — share or copy the link so you don't lose it"></span>`}
+        <span class="chev">▼</span></button>
       <div class="bar-right">
         <button class="help-btn" onClick=${actions.openHelp} aria-label="Help and how it works">?</button>
         <${ShareButton} className="share" label=${html`<span>Share</span>`} />
@@ -840,6 +896,8 @@ function ListView() {
       <${ShareButton} className="b-share" label="Share" />
       <button class="dismiss" aria-label="Dismiss" onClick=${actions.dismissSave}>×</button>
     </div>`}
+
+    ${!s.showSave && html`<${InstallBanner} />`}
 
     <form class="add" onSubmit=${submit}>
       <input value=${draft} placeholder="Add an item…" aria-label="Add an item" autocomplete="off"
@@ -888,6 +946,7 @@ function Welcome() {
             onInput=${(e) => setJoinText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && doJoin()} />
           <button class="primary sm" onClick=${doJoin}>Join</button></div>`
       : html`<button class="linkish" onClick=${() => setJoinMode(true)}>Or paste a link instead</button>`}
+    <${InstallBanner} />
   </div>`;
 }
 
@@ -918,6 +977,7 @@ function ListsSheet() {
               onInput=${(e) => setNameDraft(e.target.value)} onBlur=${commitEdit}
               onKeyDown=${(e) => e.key === 'Enter' && commitEdit()} />`
           : html`<button class="hh-name" onClick=${() => actions.switchTo(h.id)}>${h.name}</button>`}
+        ${h.saved === false && html`<span class="nb-dot" title="Not saved yet"></span>`}
         ${confirmId === h.id
           ? html`<button class="hh-confirm" onClick=${() => actions.removeHousehold(h.id)}>Remove</button>
                  <button class="hh-cancel" onClick=${() => setConfirmId(null)}>Cancel</button>`
@@ -945,7 +1005,7 @@ function App() {
   return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}${s.helpOpen && html`<${Help} />`}${s.shareOpen && html`<${ShareSheet} />`}<${Toast} /></div>`;
 }
 
-try { render(html`<${App} />`, document.getElementById('app')); boot(); }
+try { render(html`<${App} />`, document.getElementById('app')); boot(); setupInstall(); }
 catch (e) { document.getElementById('app').innerHTML =
   '<div style="max-width:30rem;margin:18vh auto;padding:0 1.6rem;font-family:system-ui,sans-serif;text-align:center">' +
   '<h2 style="font-size:1.2rem;color:#c23d2b">Couldn’t start</h2><p style="color:#6d6b5f;line-height:1.55">' + String(e) + '</p></div>';
