@@ -183,6 +183,8 @@
   .qr { margin:0 0 1.2rem; display:grid; justify-items:center; }
   .qr img, .qr-ph { width:240px; height:240px; border-radius:var(--r-md); background:#fff; padding:12px; box-shadow:var(--shadow-card); }
   .qr-ph { background:repeating-linear-gradient(45deg,#f1f1ec,#f1f1ec 8px,#e8e8e2 8px,#e8e8e2 16px); }
+  .scan-video { width:100%; max-width:300px; aspect-ratio:1; object-fit:cover; border-radius:var(--r-md); background:#000; margin:.4rem auto 0; display:block; }
+  .sheet .err { color:var(--alert); line-height:1.55; margin:.4rem 0 0; }
   .share-actions { display:flex; flex-direction:column; gap:.6rem; }
   .share-actions .primary, .share-actions .ghost { height:50px; }
 </style>
@@ -286,6 +288,7 @@ const setMeta = (k, v) => idb('meta', 'readwrite', (s) => s.put(v, k));
 const delMeta = (k) => idb('meta', 'readwrite', (s) => s.delete(k));
 const loadSnap = (id) => idb('lists', 'readonly', (s) => s.get(id));
 const saveSnap = (id, snap) => idb('lists', 'readwrite', (s) => s.put(snap, id));
+const delSnap = (id) => idb('lists', 'readwrite', (s) => s.delete(id));
 async function requestPersistence() {
   if (!navigator.storage?.persist) return; try { await navigator.storage.persist(); } catch {}
 }
@@ -446,7 +449,7 @@ class ListSync {
 
 /* --- controller ----------------------------------------------------------- */
 const store = (() => { let s = { screen: 'loading', items: [], status: { online: false, pending: false },
-    showSave: false, canInstall: false, iosInstall: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
+    showSave: false, canInstall: false, iosInstall: false, scanOpen: false, households: [], activeId: null, activeName: 'Pantry', sheetOpen: false,
     suggestions: [], toast: null, flashId: null, helpOpen: false, shareOpen: false };
   const subs = new Set();
   return { get: () => s, set: (p) => { s = { ...s, ...p }; subs.forEach((f) => f(s)); }, sub: (f) => { subs.add(f); return () => subs.delete(f); } }; })();
@@ -459,16 +462,23 @@ let activeId = null;
 // Android fires beforeinstallprompt (we defer it and offer a real button).
 // iOS has no such event, so we show Share → Add to Home Screen instructions.
 // Installing is the main thing that stops iOS clearing the list after 7 days.
-let deferredInstall = null; let installDismissed = false;
+let deferredInstall = null; let installDismissed = false; let installInit = false;
 function markInstallDismissed() { installDismissed = true; setMeta('installDismissed', true); }
-addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; if (!installDismissed) store.set({ canInstall: true }); });
+// Note: only surface the banner once setupInstall has loaded the dismissed
+// flag, otherwise an early beforeinstallprompt flashes it for users who
+// dismissed it long ago.
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; if (installInit && !installDismissed) store.set({ canInstall: true }); });
 addEventListener('appinstalled', () => { deferredInstall = null; store.set({ canInstall: false, iosInstall: false }); markInstallDismissed(); });
+// iPadOS reports itself as "Macintosh", so UA sniffing alone misses iPads.
+const isIOSDevice = () => /iphone|ipad|ipod/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 async function setupInstall() {
   installDismissed = (await getMeta('installDismissed')) === true;
+  installInit = true;
   if (installDismissed) { store.set({ canInstall: false, iosInstall: false }); return; }
   const standalone = navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   if (standalone) return;                       // already installed — nothing to nudge
-  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) store.set({ iosInstall: true });
+  if (isIOSDevice()) store.set({ iosInstall: true });
   if (deferredInstall) store.set({ canInstall: true });
 }
 
@@ -585,16 +595,23 @@ const actions = {
     h.name = name.trim() || h.name; await persist(); pushHouseholds();
   },
   removeHousehold: async (id) => {
+    const gone = households.find((h) => h.id === id);
     households = households.filter((h) => h.id !== id); await persist();
     if (activeId === id) {
       if (households.length) { await switchTo(households[0].id); }
       else { sync?.stop(); sync = null; identity = null; activeId = null; await setMeta('activeId', null);
         pushHouseholds(); store.set({ screen: 'welcome', sheetOpen: false, items: [] }); }
     } else { pushHouseholds(); }
+    // After any old sync is stopped, drop the cached (decrypted) snapshot —
+    // no orphaned list data left on the device.
+    if (gone) { try { const gi = identityFrom(hexToBytes(gone.sk));
+      await delSnap(`${gi.pubkey}:${deriveDTag(gi.pubkey, LIST_NAME)}`); } catch {} }
   },
   getShareUrl: () => location.origin + location.pathname + '#k=' + identity.nsec,
   openShare: () => store.set({ shareOpen: true, showSave: false }),
   closeShare: () => store.set({ shareOpen: false }),
+  openScan: () => store.set({ scanOpen: true }),
+  closeScan: () => store.set({ scanOpen: false }),
   copyLink: async () => {
     try { await navigator.clipboard.writeText(actions.getShareUrl()); await markActiveSaved(); showToast('Link copied — send it to whoever you’re sharing with'); }
     catch { showToast('Could not copy the link'); }
@@ -779,7 +796,7 @@ function Help() {
         <li><b>Mark urgent.</b> Press and <b>hold</b> an item’s name — it gets a red dot and jumps to the top.</li>
         <li><b>Undo.</b> Removing an item or clearing “Got it” shows an Undo button for a few seconds.</li>
         <li><b>Share.</b> Tap Share to send the list to whoever you share with. Whoever opens the link joins the same list.</li>
-        <li><b>Back up.</b> A blue dot means you haven’t saved this list’s link yet. Open Share and copy or email it to yourself — if this phone ever forgets the list, that link is the only way back to it.</li>
+        <li><b>Back up.</b> A blue dot means you haven’t saved this list’s link yet. Open Share and copy or email the link to yourself — if this phone ever forgets the list, that link gets you back in. And if someone else already has the list, they can just share it with you again.</li>
         <li><b>More lists.</b> Tap the list name at the top to switch between lists, rename them, or add a new one.</li>
       </ul>
       <div class="help-section">
@@ -879,7 +896,7 @@ function InstallBanner() {
 function ListView() {
   const s = useStore();
   const [draft, setDraft] = useState(s.pendingAdd || '');
-  useEffect(() => { if (s.pendingAdd) setDraft(s.pendingAdd); }, [s.pendingAdd]);
+  useEffect(() => { if (s.pendingAdd) { setDraft(s.pendingAdd); store.set({ pendingAdd: null }); } }, [s.pendingAdd]);
   const open = s.items.filter((i) => !i.checked.v);
   const done = s.items.filter((i) => i.checked.v);
   const label = s.status.error ? 'offline — changes saved on your phone'
@@ -954,7 +971,8 @@ function Welcome() {
           <input class="join-input" autofocus placeholder="Paste the link here" value=${joinText}
             onInput=${(e) => setJoinText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && doJoin()} />
           <button class="primary sm" onClick=${doJoin}>Join</button></div>`
-      : html`<button class="linkish" onClick=${() => setJoinMode(true)}>Or paste a link instead</button>`}
+      : html`<button class="ghost" onClick=${actions.openScan}>Scan a QR code</button>
+             <button class="linkish" onClick=${() => setJoinMode(true)}>Or paste a link instead</button>`}
     <${InstallBanner} />
   </div>`;
 }
@@ -1000,9 +1018,76 @@ function ListsSheet() {
               <input class="join-input" autofocus placeholder="Paste a shared link" value=${joinText}
                 onInput=${(e) => setJoinText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && doJoin()} />
               <button class="primary sm" onClick=${doJoin}>Join</button></div>`
-          : html`<button class="ghost" onClick=${() => setJoinOpen(true)}>Join with a link</button>`}
+          : html`<button class="ghost" onClick=${() => setJoinOpen(true)}>Join with a link</button>
+                 <button class="ghost" onClick=${actions.openScan}>Scan a QR code</button>`}
         <button class="primary" onClick=${actions.createList}>Add a new list</button>
       </div>
+    </div>
+  </div>`;
+}
+
+function ScanSheet() {
+  const video = useRef(null);
+  const done = useRef(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let alive = true, stream = null, raf = 0, last = 0, jsQR = null;
+    let lastTryText = '', lastTryAt = 0;
+    const looksLikeKey = (t) => /[#&?]k=|nsec1/i.test(t || '');
+    const found = async (text) => {
+      if (done.current) return; done.current = true;
+      const r = await actions.joinFromText(text);
+      if (r === 'ok') { actions.closeScan(); return; }
+      // Bad read (e.g. truncated QR): note it, keep the camera running, retry.
+      done.current = false;
+      actions.showToast('That QR didn’t work — hold the code steady and try again');
+    };
+    (async () => {
+      if (!window.isSecureContext) { setErr('The camera needs a secure (https) page.'); return; }
+      try {
+        jsQR = (await import('https://esm.sh/jsqr@1.4.0')).default;
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        if (!alive) { stream.getTracks().forEach((t) => t.stop()); return; }
+        const v = video.current; v.srcObject = stream; v.setAttribute('playsinline', 'true'); v.muted = true;
+        await v.play();
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const tick = (ts) => {
+          if (!alive) return;
+          if (v.readyState >= 2 && ts - last > 150) {           // throttle decode to ~7fps
+            last = ts;
+            canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+            if (canvas.width && canvas.height) {
+              ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+              const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+              if (code && code.data && looksLikeKey(code.data) && !done.current) {
+                // Cooldown so one bad code doesn't retrigger every frame.
+                if (code.data !== lastTryText || ts - lastTryAt > 3000) {
+                  lastTryText = code.data; lastTryAt = ts; found(code.data);
+                }
+              }
+            }
+          }
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      } catch (e) {
+        setErr(e && e.name === 'NotAllowedError'
+          ? 'Camera permission was denied. Allow it in your browser settings, or use “Join with a link” to paste instead.'
+          : 'Couldn’t start the camera. You can paste the link instead.');
+      }
+    })();
+    return () => { alive = false; cancelAnimationFrame(raf); if (stream) stream.getTracks().forEach((t) => t.stop()); };
+  }, []);
+  return html`<div class="sheet-overlay" onClick=${(e) => { if (e.target.classList.contains('sheet-overlay')) actions.closeScan(); }}>
+    <div class="sheet">
+      <div class="help-head"><h2>Scan a list</h2>
+        <button class="dismiss" aria-label="Close" onClick=${actions.closeScan}>×</button></div>
+      ${err
+        ? html`<p class="err">${err}</p>`
+        : html`<p class="note">Point your camera at the QR code on the other phone’s Share screen.</p>
+               <video ref=${video} class="scan-video" muted playsinline></video>`}
     </div>
   </div>`;
 }
@@ -1010,8 +1095,8 @@ function ListsSheet() {
 function App() {
   const s = useStore();
   if (s.screen === 'loading') return html`<div class="boot"><span class="mark">✓</span></div>`;
-  if (s.screen === 'welcome') return html`<div><${Welcome} /><${Toast} /></div>`;
-  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}${s.helpOpen && html`<${Help} />`}${s.shareOpen && html`<${ShareSheet} />`}<${Toast} /></div>`;
+  if (s.screen === 'welcome') return html`<div><${Welcome} />${s.scanOpen && html`<${ScanSheet} />`}<${Toast} /></div>`;
+  return html`<div><${ListView} />${s.sheetOpen && html`<${ListsSheet} />`}${s.helpOpen && html`<${Help} />`}${s.shareOpen && html`<${ShareSheet} />`}${s.scanOpen && html`<${ScanSheet} />`}<${Toast} /></div>`;
 }
 
 try { render(html`<${App} />`, document.getElementById('app')); boot(); setupInstall(); }
